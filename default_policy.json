@@ -1,0 +1,7 @@
+{
+  "allowed_digests": [],
+  "allowed_policies": [],
+  "min_fw_api_major": 0,
+  "min_fw_api_minor": 0,
+  "allowed_build_ids": []
+}
