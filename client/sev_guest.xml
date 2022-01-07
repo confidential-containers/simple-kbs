@@ -1,0 +1,59 @@
+<domain type='kvm'>
+	<name>sev-guest</name>
+	<memory unit='KiB'>4194304</memory>
+	<currentMemory unit='KiB'>4194304</currentMemory>
+	<memoryBacking>
+		<locked/>
+	</memoryBacking>
+	<vcpu placement='static'>4</vcpu>
+	<os>
+		<type arch='x86_64' machine='pc-q35-3.0'>hvm</type>
+		<kernel>/path/to/kernel</kernel>
+		<initrd>/path/to/initrd</initrd>
+		<!-- cmdline can be whatever you want-->
+		<cmdline>console=tty1 console=ttyS0 loglevel=7 earlyprintk=ttyS0 break=premount rdinit=/bin/sh</cmdline>
+		<!-- use a unified OVMF image build from AmdSev package -->
+		<loader type='pflash'>/path/to/ovmf/</loader>
+	</os>
+	<features>
+		<acpi/>
+		<apic/>
+		<vmport state='off'/>
+	</features>
+	<cpu mode='host-model' check='partial'>
+		<model fallback='allow'/>
+	</cpu>
+	<clock offset='utc'>
+		<timer name='rtc' tickpolicy='catchup'/>
+		<timer name='pit' tickpolicy='delay'/>
+		<timer name='hpet' present='no'/>
+	</clock>
+	<on_poweroff>destroy</on_poweroff>
+	<on_reboot>restart</on_reboot>
+	<on_crash>destroy</on_crash>
+	<pm>
+		<suspend-to-mem enabled='no'/>
+		<suspend-to-disk enabled='no'/>
+	</pm>
+	<devices>
+		<!-- Use a relatively new QEMU -->
+		<emulator>/path/to/qemu-system-x86_64</emulator>
+                <serial type='pty'>
+                    <target port='0'/>
+                </serial>
+                <console type='pty'>
+                    <target type='serial' port='0'/>
+                </console>
+				<controller type='virtio-serial' index='0'>
+					<driver iommu='on'/>
+				</controller>
+				<controller type='scsi' index='0' model='virtio-scsi'>
+					<driver iommu='on'/>
+				</controller>
+			</devices>
+                        <launchSecurity type='sev' kernelHashes='yes'>
+				<cbitpos>47</cbitpos>
+				<reducedPhysBits>1</reducedPhysBits>
+				<policy>0x0000</policy>
+			</launchSecurity>
+		</domain>
