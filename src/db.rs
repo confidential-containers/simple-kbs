@@ -7,11 +7,11 @@ use crate::policy;
 use crate::request;
 
 use anyhow::*;
-use mysql::{OptsBuilder, Pool, PooledConn, TxOpts};
-use uuid::Uuid;
-use std::env;
 use log::*;
+use mysql::{OptsBuilder, Pool, PooledConn, TxOpts};
+use std::env;
 use std::result::Result::Ok;
+use uuid::Uuid;
 
 use mysql::prelude::*;
 
@@ -38,9 +38,7 @@ impl Default for Connection {
     }
 }
 
-
-pub fn get_dbconn()-> mysql::Result<PooledConn> {
-
+pub fn get_dbconn() -> mysql::Result<PooledConn> {
     let host_name = env::var("KBS_DB_HOST").expect("KBS_DB_HOST not set");
     let user_name = env::var("KBS_DB_USER").expect("KBS_DB_USER not set.");
     let db_pw = env::var("KBS_DB_PW").expect("KBS_DB_PW not set.");
@@ -58,9 +56,7 @@ pub fn get_dbconn()-> mysql::Result<PooledConn> {
     Ok(dbconn)
 }
 
-
 pub fn insert_connection(connection: Connection) -> Result<Uuid> {
-
     let mut dbconn = get_dbconn().unwrap();
 
     let nwuuid = Uuid::new_v4();
@@ -68,7 +64,8 @@ pub fn insert_connection(connection: Connection) -> Result<Uuid> {
 
     let mqstr = "INSERT INTO conn_bundle (id, policy, fw_api_major, fw_api_minor, 
                  fw_build_id, launch_description, fw_digest,create_date) 
-                 VALUES(?, ?, ?, ?, ?, ?, ?,NOW())".to_string();
+                 VALUES(?, ?, ?, ?, ?, ?, ?,NOW())"
+        .to_string();
 
     let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
 
@@ -89,26 +86,25 @@ pub fn insert_connection(connection: Connection) -> Result<Uuid> {
 }
 
 pub fn delete_connection(uuid: Uuid) -> Result<Uuid> {
-
     let mut dbconn = get_dbconn().unwrap();
 
-    let mqstr ="DELETE from conn_bundle WHERE id = ?";
+    let mqstr = "DELETE from conn_bundle WHERE id = ?";
 
     let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
     trnsx.exec_drop(mqstr, (uuid.to_hyphenated().to_string(),))?;
-    trnsx.commit()?;                
+    trnsx.commit()?;
     Ok(uuid)
 }
 
 pub fn get_connection(uuid: Uuid) -> Result<Connection> {
-
     let mut dbconn = get_dbconn().unwrap();
 
     let uuidstr = uuid.to_hyphenated().to_string();
     let mqstr = "SELECT policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest FROM conn_bundle WHERE id = ?";
 
     let conres = dbconn.exec_map(
-        mqstr,( uuidstr, ),
+        mqstr,
+        (uuidstr,),
         |(policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest)| {
             Connection {
                 policy,
@@ -125,13 +121,12 @@ pub fn get_connection(uuid: Uuid) -> Result<Connection> {
 }
 
 pub fn get_secret_policy(sec: &String) -> Option<policy::Policy> {
-
     let mut dbconn = get_dbconn().unwrap();
     let mut trnsx = dbconn.start_transaction(TxOpts::default()).ok()?;
 
     let mqstr = "SELECT polids FROM secpol WHERE secret = ?";
 
-    let val: Option<i32> = trnsx.exec_first(mqstr,(sec,)).ok()?;
+    let val: Option<i32> = trnsx.exec_first(mqstr, (sec,)).ok()?;
 
     if val.is_none() {
         error!(
@@ -143,7 +138,7 @@ pub fn get_secret_policy(sec: &String) -> Option<policy::Policy> {
 
     let mqstr = "SELECT allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids FROM policy WHERE id = ?";
 
-    let polval: Vec<(String, String, u32, u32, String)> = trnsx.exec(mqstr,(val,)).ok()?;
+    let polval: Vec<(String, String, u32, u32, String)> = trnsx.exec(mqstr, (val,)).ok()?;
 
     Some(policy::Policy {
         allowed_digests: serde_json::from_str(&polval[0].0).unwrap(),
@@ -155,7 +150,6 @@ pub fn get_secret_policy(sec: &String) -> Option<policy::Policy> {
 }
 
 pub fn insert_polid(sec: &String, polid: u32) -> Result<u32> {
-
     let mut dbconn = get_dbconn().unwrap();
 
     let mqstr = "INSERT INTO secpol (secret, polids ) VALUES(?, ?)".to_string();
@@ -168,14 +162,13 @@ pub fn insert_polid(sec: &String, polid: u32) -> Result<u32> {
 }
 
 pub fn delete_polid(sec: &String) -> Result<String> {
-
     let mut dbconn = get_dbconn().unwrap();
 
     let mqstr = "DELETE from secpol WHERE secret = ?";
 
     let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
 
-    trnsx.exec_drop(mqstr, (&sec, ))?;
+    trnsx.exec_drop(mqstr, (&sec,))?;
     trnsx.commit()?;
     Ok(sec.clone())
 }
@@ -196,7 +189,6 @@ pub fn get_keyset_ids(_id: &str) -> Result<Vec<String>> {
 // The key struct is in request.rs. Secret payload should
 // be a string.
 pub fn get_secret(id: &String) -> Option<request::Key> {
-
     let mut dbconn = get_dbconn().unwrap();
     let mut trnsx = dbconn.start_transaction(TxOpts::default()).ok()?;
 
@@ -210,7 +202,6 @@ pub fn get_secret(id: &String) -> Option<request::Key> {
 }
 
 pub fn insert_secret(id: &String, sec: &String, polid: u32) -> Result<String> {
-
     let mut dbconn = get_dbconn().unwrap();
 
     let mqstr = "INSERT INTO secrets (secret_id, secret, polid ) VALUES(?, ?, ?)";
@@ -223,7 +214,6 @@ pub fn insert_secret(id: &String, sec: &String, polid: u32) -> Result<String> {
 }
 
 pub fn delete_secret(id: &String) -> Result<String> {
-
     let mut dbconn = get_dbconn().unwrap();
 
     let mqstr = "DELETE from secrets WHERE secret_id = ?";

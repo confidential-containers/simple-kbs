@@ -54,8 +54,9 @@ impl Policy {
 
         // if we have exactly the minimum required major version,
         // check that the minor version is appropriate.
-        if connection.fw_api_major == self.min_fw_api_major &&
-            connection.fw_api_minor < self.min_fw_api_minor {
+        if connection.fw_api_major == self.min_fw_api_major
+            && connection.fw_api_minor < self.min_fw_api_minor
+        {
             return Err(anyhow!("fw api minor not valid"));
         }
 
