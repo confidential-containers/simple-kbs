@@ -4,7 +4,7 @@
 //
 
 use anyhow::*;
-use clap::{Command, Arg};
+use clap::{Arg, Command};
 use log::*;
 use std::net::SocketAddr;
 
