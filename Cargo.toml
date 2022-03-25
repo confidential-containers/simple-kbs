@@ -1,5 +1,5 @@
 [package]
-name = "kbs-rs"
+name = "simple-kbs"
 version = "0.1.0"
 edition = "2021"
 
