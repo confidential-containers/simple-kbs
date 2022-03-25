@@ -98,9 +98,9 @@ impl KeyBrokerService for KeyBroker {
             &connection
         );
 
-        let session = SESSIONS.lock().unwrap().remove(&launch_id).ok_or_else(||
+        let session = SESSIONS.lock().unwrap().remove(&launch_id).ok_or_else(|| {
             Status::internal(format!("Launch ID not found. UUID: {}", &launch_id))
-        )?;
+        })?;
 
         // verify launch measurement
         let session_verified = verify_measurement(connection, r.launch_measurement, session)
