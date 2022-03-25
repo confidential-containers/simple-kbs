@@ -4,7 +4,7 @@
 //
 
 use anyhow::*;
-use clap::{App, Arg};
+use clap::{Command, Arg};
 use log::*;
 use std::net::SocketAddr;
 
@@ -17,7 +17,7 @@ pub mod sev_tools;
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
-    let args = App::new("kbs-rs")
+    let args = Command::new("kbs-rs")
         .version("0.0.1")
         .arg(
             Arg::new("socket addr")
