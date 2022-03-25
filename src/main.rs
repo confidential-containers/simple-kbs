@@ -17,7 +17,7 @@ pub mod sev_tools;
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
-    let args = Command::new("kbs-rs")
+    let args = Command::new("simple-kbs")
         .version("0.0.1")
         .arg(
             Arg::new("socket addr")
