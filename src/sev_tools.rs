@@ -6,7 +6,7 @@
 use crate::db;
 use anyhow::*;
 use codicon::{Decoder, Encoder};
-use sev::launch::sev::{HeaderFlags, Policy, PolicyFlags};
+use sev::launch::sev::{HeaderFlags, Policy};
 use sev::session::{Initialized, Session, Verified};
 use sev::{Build, Version};
 
@@ -14,10 +14,11 @@ pub fn generate_launch_bundle(
     policy: u32,
     cert_chain: String,
 ) -> Result<(String, String, Session<Initialized>)> {
-    let session = Session::try_from(get_policy(policy)).unwrap();
+    let session = Session::try_from(Policy::from(policy)).unwrap();
 
     let mut bin_chain = std::io::Cursor::new(base64::decode(&cert_chain)?);
-    let chain = sev::certs::Chain::decode(&mut bin_chain, ()).unwrap();
+    let chain = sev::certs::Chain::decode(&mut bin_chain, ())
+        .map_err(|e| anyhow!("Cert Chain not formatted correctly: {}", e))?;
 
     let start = session
         .start(chain)
@@ -65,11 +66,4 @@ pub fn package_secret(session: Session<Verified>, secret: &[u8]) -> Result<(Stri
     let data = base64::encode(secret.ciphertext);
 
     Ok((header, data))
-}
-
-pub fn get_policy(p: u32) -> Policy {
-    Policy {
-        flags: PolicyFlags::from_bits_truncate((p & 0xFF) as u16),
-        minfw: (((p & 0xFF00) >> 8) as u16).into(),
-    }
 }
