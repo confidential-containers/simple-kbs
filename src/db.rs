@@ -129,8 +129,8 @@ pub fn get_secret_policy(sec: &str) -> Option<policy::Policy> {
     let val: Option<i32> = trnsx.exec_first(mqstr, (sec,)).ok()?;
 
     if val.is_none() {
-        error!(
-            "get_secret_policy::error cannot get policy id with secret {}",
+        info!(
+            "No policy has been set for secret with id: {}",
             &sec
         );
         return None;
@@ -195,9 +195,11 @@ pub fn get_secret(id: &str) -> Option<request::Key> {
     let mqstr = "SELECT secret FROM secrets WHERE secret_id = ?";
     let val: Option<String> = trnsx.exec_first(mqstr, (id,)).ok()?;
 
+    let payload = val?;
+
     Some(request::Key {
         id: id.to_string(),
-        payload: val.unwrap(),
+        payload,
     })
 }
 
