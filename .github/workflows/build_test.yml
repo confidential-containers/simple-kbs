@@ -1,6 +1,6 @@
 name: simple-kbs tests
 
-on: 
+on:
   push:
     branches: [ main, staging ]
   pull_request:
@@ -53,4 +53,32 @@ jobs:
         with:
           command: clippy
           args: -- -D warnings
-        
+
+  test:
+    runs-on: ubuntu-latest
+    env:
+      KBS_DB_HOST: localhost
+      KBS_DB_USER: root
+      KBS_DB_PW: root
+      KBS_DB: simple_kbs
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: setup mysql
+        run: |
+          sudo systemctl start mysql
+          mysql -u${{env.KBS_DB_USER}} -p${{env.KBS_DB_PW}} -e 'CREATE DATABASE ${{env.KBS_DB}};'
+          mysql -u${{env.KBS_DB_USER}} -p${{env.KBS_DB_PW}} ${{env.KBS_DB}} < db.sql
+
+      - name: cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
