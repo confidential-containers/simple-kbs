@@ -120,7 +120,7 @@ pub fn get_connection(uuid: Uuid) -> Result<Connection> {
     Ok(conres[0].clone())
 }
 
-pub fn get_secret_policy(sec: &String) -> Option<policy::Policy> {
+pub fn get_secret_policy(sec: &str) -> Option<policy::Policy> {
     let mut dbconn = get_dbconn().unwrap();
     let mut trnsx = dbconn.start_transaction(TxOpts::default()).ok()?;
 
@@ -149,7 +149,7 @@ pub fn get_secret_policy(sec: &String) -> Option<policy::Policy> {
     })
 }
 
-pub fn insert_polid(sec: &String, polid: u32) -> Result<u32> {
+pub fn insert_polid(sec: &str, polid: u32) -> Result<u32> {
     let mut dbconn = get_dbconn().unwrap();
 
     let mqstr = "INSERT INTO secpol (secret, polids ) VALUES(?, ?)".to_string();
@@ -161,7 +161,7 @@ pub fn insert_polid(sec: &String, polid: u32) -> Result<u32> {
     Ok(polid)
 }
 
-pub fn delete_polid(sec: &String) -> Result<String> {
+pub fn delete_polid(sec: &str) -> Result<String> {
     let mut dbconn = get_dbconn().unwrap();
 
     let mqstr = "DELETE from secpol WHERE secret = ?";
@@ -170,7 +170,7 @@ pub fn delete_polid(sec: &String) -> Result<String> {
 
     trnsx.exec_drop(mqstr, (&sec,))?;
     trnsx.commit()?;
-    Ok(sec.clone())
+    Ok(sec.to_string())
 }
 
 pub fn get_keyset_policy(_secset: &str) -> Option<policy::Policy> {
@@ -188,7 +188,7 @@ pub fn get_keyset_ids(_id: &str) -> Result<Vec<String>> {
 //
 // The key struct is in request.rs. Secret payload should
 // be a string.
-pub fn get_secret(id: &String) -> Option<request::Key> {
+pub fn get_secret(id: &str) -> Option<request::Key> {
     let mut dbconn = get_dbconn().unwrap();
     let mut trnsx = dbconn.start_transaction(TxOpts::default()).ok()?;
 
@@ -201,7 +201,7 @@ pub fn get_secret(id: &String) -> Option<request::Key> {
     })
 }
 
-pub fn insert_secret(id: &String, sec: &String, polid: u32) -> Result<String> {
+pub fn insert_secret(id: &str, sec: &str, polid: u32) -> Result<String> {
     let mut dbconn = get_dbconn().unwrap();
 
     let mqstr = "INSERT INTO secrets (secret_id, secret, polid ) VALUES(?, ?, ?)";
@@ -210,10 +210,10 @@ pub fn insert_secret(id: &String, sec: &String, polid: u32) -> Result<String> {
 
     trnsx.exec_drop(mqstr, (&id, &sec, &polid))?;
     trnsx.commit()?;
-    Ok(id.clone())
+    Ok(id.to_string())
 }
 
-pub fn delete_secret(id: &String) -> Result<String> {
+pub fn delete_secret(id: &str) -> Result<String> {
     let mut dbconn = get_dbconn().unwrap();
 
     let mqstr = "DELETE from secrets WHERE secret_id = ?";
@@ -222,7 +222,7 @@ pub fn delete_secret(id: &String) -> Result<String> {
 
     trnsx.exec_drop(mqstr, (id,))?;
     trnsx.commit()?;
-    Ok(id.clone())
+    Ok(id.to_string())
 }
 
 #[cfg(test)]
