@@ -62,7 +62,7 @@ pub struct SecretRequest {
 }
 
 impl SecretRequest {
-    pub fn new(requests: &Vec<RequestDetails>) -> Result<Self> {
+    pub fn new(requests: &[RequestDetails]) -> Result<Self> {
         // include tenant default policy
         let mut policies = vec![policy::Policy::tenant_default()?];
 
