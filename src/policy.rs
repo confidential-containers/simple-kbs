@@ -10,7 +10,7 @@ use std::fs;
 
 const DEFAULT_POLICY_PATH: &str = "default_policy.json";
 
-#[derive(Deserialize)]
+#[derive(Deserialize, PartialEq, Debug)]
 pub struct Policy {
     pub allowed_digests: Vec<String>,
     pub allowed_policies: Vec<u32>,
