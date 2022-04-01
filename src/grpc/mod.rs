@@ -82,11 +82,13 @@ impl KeyBrokerService for KeyBroker {
             fw_digest: r.fw_digest,
         };
 
-        // parse secret request
-        let secret_request = request::SecretRequest::new(&r.secret_requests)
+        let mut secret_request = request::SecretRequest::new();
+
+        secret_request
+            .parse_requests(&r.secret_requests)
             .map_err(|e| Status::internal(format!("Bad secret request: {}", e)))?;
 
-        let policies = secret_request.get_policies();
+        let policies = secret_request.policies();
 
         // Validate connection against policies
         for p in policies {
@@ -106,10 +108,13 @@ impl KeyBrokerService for KeyBroker {
         let session_verified = verify_measurement(connection, r.launch_measurement, session)
             .map_err(|e| Status::internal(format!("Measurement Verification Failed: {}", e)))?;
 
-        // package secret
-        let (secret_header, secret_data) =
-            package_secret(session_verified, secret_request.get_payload())
-                .map_err(|e| Status::internal(format!("Failed to package secret: {}", e)))?;
+        // get secret(s)
+        let secret_payload = &secret_request
+            .payload()
+            .map_err(|e| Status::internal(format!("Cannot fulfill secret request: {}", e)))?;
+
+        let (secret_header, secret_data) = package_secret(session_verified, secret_payload)
+            .map_err(|e| Status::internal(format!("Failed to package secret: {}", e)))?;
 
         let reply = SecretResponse {
             launch_secret_header: secret_header,

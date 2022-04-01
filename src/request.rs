@@ -28,22 +28,108 @@ fn uuid_bytes_le(u: &Uuid) -> [u8; 16] {
     r
 }
 
-#[derive(Serialize, Deserialize)]
-struct Request {
-    guid: String,
-    format: String,
-    secret_type: String,
-    id: String,
+// Struct representing the entire request
+pub struct SecretRequest {
+    secrets: Vec<Box<dyn SecretType>>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct RequestList {
-    requests: Vec<Request>,
+impl Default for SecretRequest {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
-// we need two serialization methods
-// either to binary, which turns a key just into
-// a binary payload or string which we use for json serialization
+impl SecretRequest {
+    pub fn new() -> Self {
+        SecretRequest { secrets: vec![] }
+    }
+
+    // should return Err in case of non-sensitive parsing failure
+    pub fn parse_requests(&mut self, requests: &[RequestDetails]) -> Result<()> {
+        for r in requests {
+            let secret: Box<dyn SecretType> = match &r.secret_type[..] {
+                "bundle" => Box::new(SecretBundle { request: r.clone() }),
+                "key" => Box::new(SecretKey { request: r.clone() }),
+                _ => return Err(anyhow!("Unknown Secret Type")),
+            };
+
+            self.secrets.push(secret);
+        }
+
+        Ok(())
+    }
+
+    pub fn policies(&self) -> Vec<policy::Policy> {
+        // include tenant default
+        let mut policies = vec![policy::Policy::tenant_default().unwrap()];
+        for s in &self.secrets {
+            policies.extend(s.policies())
+        }
+        policies
+    }
+
+    pub fn payload(&self) -> Result<Vec<u8>> {
+        let mut payload = vec![];
+
+        for s in &self.secrets {
+            let secret_payload = s.payload()?;
+
+            payload.extend_from_slice(&uuid_bytes_le(&Uuid::parse_str(s.guid()).unwrap()));
+            payload.extend_from_slice(
+                &u32::try_from(secret_payload.len() + 20)
+                    .unwrap()
+                    .to_le_bytes(),
+            );
+
+            payload.extend_from_slice(&secret_payload);
+        }
+
+        let mut secret_table = vec![];
+
+        secret_table.extend_from_slice(&uuid_bytes_le(&SECRET_GUID));
+        secret_table.extend_from_slice(&u32::try_from(payload.len() + 20).unwrap().to_le_bytes());
+        secret_table.extend_from_slice(&payload);
+
+        // padding: align to 16-byte boundary
+        let padded_length = (secret_table.len() + 15) & !15;
+        secret_table.extend_from_slice(&vec![0u8; padded_length - secret_table.len()]);
+
+        Ok(secret_table)
+    }
+}
+
+trait SecretType {
+    fn payload(&self) -> Result<Vec<u8>>;
+    fn policies(&self) -> Vec<policy::Policy>;
+    fn guid(&self) -> &String;
+}
+
+struct SecretKey {
+    request: RequestDetails,
+}
+
+impl SecretType for SecretKey {
+    fn payload(&self) -> Result<Vec<u8>> {
+        let key = db::get_secret(&self.request.id)?;
+        Ok(match &self.request.format[..] {
+            "binary" => key.into_bytes(),
+            "json" => serde_json::to_string(&key).unwrap().into_bytes(),
+            _ => return Err(anyhow!("Unknown format type")),
+        })
+    }
+
+    fn policies(&self) -> Vec<policy::Policy> {
+        if let Some(p) = db::get_secret_policy(&self.request.id) {
+            return vec![p];
+        }
+        vec![]
+    }
+
+    fn guid(&self) -> &String {
+        &self.request.guid
+    }
+}
+
 #[derive(Serialize, Deserialize, Default)]
 pub struct Key {
     pub id: String,
@@ -56,101 +142,127 @@ impl Key {
     }
 }
 
-pub struct SecretRequest {
-    policies: Vec<policy::Policy>,
-    payload: Vec<u8>,
+struct SecretBundle {
+    request: RequestDetails,
 }
 
-impl SecretRequest {
-    pub fn new(requests: &[RequestDetails]) -> Result<Self> {
-        // include tenant default policy
-        let mut policies = vec![policy::Policy::tenant_default()?];
+impl SecretType for SecretBundle {
+    fn payload(&self) -> Result<Vec<u8>> {
+        let mut bundle = HashMap::new();
 
-        // vector for payload
-        // this does not include the header
-        let mut payload = vec![];
+        let secrets = db::get_keyset_ids(&self.request.id)?;
+        for s in secrets {
+            let k = db::get_secret(&s)?;
+            bundle.insert(k.id, k.payload);
+        }
+        Ok(serde_json::to_string(&bundle)?.into_bytes())
+    }
 
-        // TODO: separate this into multiple functions
-        //       and create a trait for secret types so that we can
-        //       easily add more
-        for r in requests {
-            // for each request we must create guided entry in the table
-            // this match should give us the payload for the guided entry
-            let guid_payload = match &r.secret_type[..] {
-                "bundle" => {
-                    if r.format == "binary" {
-                        return Err(anyhow!("Bundle format must be JSON"));
-                    }
+    fn policies(&self) -> Vec<policy::Policy> {
+        let mut policies = vec![];
 
-                    let mut bundle = HashMap::new();
-                    if let Some(pid) = db::get_keyset_policy(&r.id) {
-                        policies.push(pid);
-                    }
-                    let secrets = db::get_keyset_ids(&r.id)?;
-                    for s in secrets {
-                        // make header format
-                        if let Some(p) = db::get_secret_policy(&s) {
-                            policies.push(p);
-                        }
-                        if let Some(k) = db::get_secret(&s) {
-                            bundle.insert(k.id, k.payload);
-                        }
-                    }
-                    serde_json::to_string(&bundle)?.into_bytes()
-                }
-                "key" => {
-                    if let Some(p) = db::get_secret_policy(&r.id) {
-                        policies.push(p);
-                    }
-                    if let Some(key) = db::get_secret(&r.id) {
-                        match &r.format[..] {
-                            "binary" => key.into_bytes(),
-                            "json" => serde_json::to_string(&key)?.into_bytes(),
-                            _ => return Err(anyhow!("Invalid secret format.")),
-                        }
-                    } else {
-                        return Err(anyhow!("Invalid secret format."));
-                    }
-                }
-                "resource" => {
-                    // TODO
-                    b"placeholder".to_vec()
-                }
-                _ => return Err(anyhow!("Unknown Secret Type")),
-            };
-
-            payload.extend_from_slice(&uuid_bytes_le(&Uuid::parse_str(&r.guid).unwrap()));
-            payload.extend_from_slice(
-                &u32::try_from(guid_payload.len() + 20)
-                    .unwrap()
-                    .to_le_bytes(),
-            );
-
-            payload.extend_from_slice(&guid_payload);
+        if let Some(p) = db::get_keyset_policy(&self.request.id) {
+            policies.push(p);
         }
 
-        // Construct the secret header with the secret guid
-        let mut secret_table = vec![];
+        if let std::result::Result::Ok(secrets) = db::get_keyset_ids(&self.request.id) {
+            for s in secrets {
+                if let Some(p) = db::get_secret_policy(&s) {
+                    policies.push(p);
+                }
+            }
+        }
 
-        secret_table.extend_from_slice(&uuid_bytes_le(&SECRET_GUID));
-        secret_table.extend_from_slice(&u32::try_from(payload.len() + 20).unwrap().to_le_bytes());
-        secret_table.extend_from_slice(&payload);
-
-        // padding: align to 16-byte boundary
-        let padded_length = (secret_table.len() + 15) & !15;
-        secret_table.extend_from_slice(&vec![0u8; padded_length - secret_table.len()]);
-
-        Ok(SecretRequest {
-            policies,
-            payload: secret_table,
-        })
+        policies
     }
 
-    pub fn get_policies(&self) -> &Vec<policy::Policy> {
-        &self.policies
+    fn guid(&self) -> &String {
+        &self.request.guid
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db;
+    use crate::grpc::key_broker::RequestDetails;
+
+    #[test]
+    fn test_secret_key() {
+        let secret_id = "keyid-1".to_string();
+        let guid = "2cf13667-ea72-4013-9dd6-155e89c5a28f".to_string();
+        let request = RequestDetails {
+            guid: guid.clone(),
+            format: "binary".to_string(),
+            secret_type: "key".to_string(),
+            id: secret_id.clone(),
+        };
+
+        let secret_value = "dGVzdCBzZWNyZXQ=".to_string(); // "test secret" -> b64
+        let secret_bytes = base64::decode(&secret_value).unwrap();
+        db::insert_secret_only(&secret_id, &secret_value).unwrap();
+
+        let secret_key = SecretKey { request };
+        assert!(secret_key.policies().is_empty());
+        assert_eq!(secret_key.guid(), &guid);
+        assert_eq!(secret_bytes, secret_key.payload().unwrap());
+
+        db::delete_secret(&secret_id).unwrap();
     }
 
-    pub fn get_payload(&self) -> &Vec<u8> {
-        &self.payload
+    #[test]
+    fn test_request_parsing() {
+        let secret_id = "keyid-2".to_string();
+        let guid = "2cf13667-ea72-4013-9dd6-155e89c5a28f".to_string();
+        let request = RequestDetails {
+            guid: guid.clone(),
+            format: "binary".to_string(),
+            secret_type: "key".to_string(),
+            id: secret_id.clone(),
+        };
+
+        let secret_value = "dGVzdCBzZWNyZXQ=".to_string(); // "test secret" -> b64
+        let secret_bytes = base64::decode(&secret_value).unwrap();
+
+        // this length is hardcoded in the struct below
+        assert_eq!(secret_bytes.len(), 11);
+
+        db::insert_secret_only(&secret_id, &secret_value).unwrap();
+
+        let requests = vec![request];
+        let mut secret_request = SecretRequest::new();
+        secret_request.parse_requests(&requests).unwrap();
+        let policies = secret_request.policies();
+
+        let expected_policy = policy::Policy::tenant_default().unwrap();
+        assert_eq!(policies.len(), 1);
+        assert_eq!(policies[0], expected_policy);
+
+        let payload = secret_request.payload().unwrap();
+
+        #[repr(C)]
+        #[derive(Serialize)]
+        struct ExpectedPayload {
+            table_guid: [u8; 16],
+            table_length: u32,
+            secret_guid: [u8; 16],
+            secret_length: u32,
+            secret_payload: [u8; 11],
+            padding: [u8; 13],
+        }
+
+        let expected_payload = ExpectedPayload {
+            table_guid: uuid_bytes_le(&SECRET_GUID),
+            table_length: 51, // does not include padding
+            secret_guid: uuid_bytes_le(&Uuid::parse_str(&guid).unwrap()),
+            secret_length: 31, // payload size + header size
+            secret_payload: secret_bytes.try_into().unwrap(),
+            padding: [0u8; 13],
+        };
+
+        let expected_payload_binary = bincode::serialize(&expected_payload).unwrap();
+        assert_eq!(expected_payload_binary, payload);
+
+        db::delete_secret(&secret_id).unwrap();
     }
 }

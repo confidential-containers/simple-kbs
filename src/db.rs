@@ -129,10 +129,7 @@ pub fn get_secret_policy(sec: &str) -> Option<policy::Policy> {
     let val: Option<i32> = trnsx.exec_first(mqstr, (sec,)).ok()?;
 
     if val.is_none() {
-        info!(
-            "No policy has been set for secret with id: {}",
-            &sec
-        );
+        info!("No policy has been set for secret with id: {}", &sec);
         return None;
     }
 
@@ -188,16 +185,16 @@ pub fn get_keyset_ids(_id: &str) -> Result<Vec<String>> {
 //
 // The key struct is in request.rs. Secret payload should
 // be a string.
-pub fn get_secret(id: &str) -> Option<request::Key> {
+pub fn get_secret(id: &str) -> Result<request::Key> {
     let mut dbconn = get_dbconn().unwrap();
-    let mut trnsx = dbconn.start_transaction(TxOpts::default()).ok()?;
+    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
 
     let mqstr = "SELECT secret FROM secrets WHERE secret_id = ?";
-    let val: Option<String> = trnsx.exec_first(mqstr, (id,)).ok()?;
+    let val: Option<String> = trnsx.exec_first(mqstr, (id,))?;
 
-    let payload = val?;
+    let payload = val.ok_or_else(|| anyhow!("secret not found."))?;
 
-    Some(request::Key {
+    Ok(request::Key {
         id: id.to_string(),
         payload,
     })
@@ -211,6 +208,18 @@ pub fn insert_secret(id: &str, sec: &str, polid: u32) -> Result<String> {
     let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
 
     trnsx.exec_drop(mqstr, (&id, &sec, &polid))?;
+    trnsx.commit()?;
+    Ok(id.to_string())
+}
+
+pub fn insert_secret_only(id: &str, sec: &str) -> Result<String> {
+    let mut dbconn = get_dbconn().unwrap();
+
+    let mqstr = "INSERT INTO secrets (secret_id, secret) VALUES(?, ?)";
+
+    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
+
+    trnsx.exec_drop(mqstr, (&id, &sec))?;
     trnsx.commit()?;
     Ok(id.to_string())
 }
@@ -253,7 +262,7 @@ mod tests {
         let sec = "LXItLS4gIDEgcm9vdCByb290ICAxNzMgQXVnIDMwIDA2OjQ2IC52bWxpbnV6LTQuMTguMC0zMDUuMTcuMS5lbDhfNC54ODZfNjQuaG1hYwo=".to_string();
         let tpid = 1;
 
-        let polid = insert_polid(&sec, tpid).unwrap();
+        let _polid = insert_polid(&sec, tpid).unwrap();
 
         let testpol = get_secret_policy(&sec).unwrap();
 
