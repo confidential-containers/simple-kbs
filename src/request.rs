@@ -119,10 +119,10 @@ impl SecretType for SecretKey {
     }
 
     fn policies(&self) -> Vec<policy::Policy> {
-        if let Some(p) = db::get_secret_policy(&self.request.id) {
-            return vec![p];
+        match db::get_secret_policy(&self.request.id) {
+            Some(p) => vec![p],
+            None => vec![],
         }
-        vec![]
     }
 
     fn guid(&self) -> &String {
@@ -159,17 +159,11 @@ impl SecretType for SecretBundle {
     }
 
     fn policies(&self) -> Vec<policy::Policy> {
-        let mut policies = vec![];
-
-        if let Some(p) = db::get_keyset_policy(&self.request.id) {
-            policies.push(p);
-        }
+        let mut policies = vec![db::get_keyset_policy(&self.request.id).unwrap()];
 
         if let std::result::Result::Ok(secrets) = db::get_keyset_ids(&self.request.id) {
             for s in secrets {
-                if let Some(p) = db::get_secret_policy(&s) {
-                    policies.push(p);
-                }
+                policies.push(db::get_secret_policy(&s).unwrap());
             }
         }
 
@@ -189,7 +183,7 @@ mod tests {
 
     #[test]
     fn test_secret_key() {
-        let secret_id = "keyid-1".to_string();
+        let secret_id = Uuid::new_v4().to_hyphenated().to_string();
         let guid = "2cf13667-ea72-4013-9dd6-155e89c5a28f".to_string();
         let request = RequestDetails {
             guid: guid.clone(),
@@ -200,6 +194,7 @@ mod tests {
 
         let secret_value = "dGVzdCBzZWNyZXQ=".to_string(); // "test secret" -> b64
         let secret_bytes = base64::decode(&secret_value).unwrap();
+
         db::insert_secret_only(&secret_id, &secret_value).unwrap();
 
         let secret_key = SecretKey { request };
@@ -212,7 +207,7 @@ mod tests {
 
     #[test]
     fn test_request_parsing() {
-        let secret_id = "keyid-2".to_string();
+        let secret_id = Uuid::new_v4().to_hyphenated().to_string();
         let guid = "2cf13667-ea72-4013-9dd6-155e89c5a28f".to_string();
         let request = RequestDetails {
             guid: guid.clone(),
