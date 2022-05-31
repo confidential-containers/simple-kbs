@@ -7,6 +7,7 @@
 use anyhow::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::result::Result::Ok;
 use uuid::Uuid;
 
 use crate::db;
@@ -159,11 +160,16 @@ impl SecretType for SecretBundle {
     }
 
     fn policies(&self) -> Vec<policy::Policy> {
-        let mut policies = vec![db::get_keyset_policy(&self.request.id).unwrap()];
+        let mut policies = vec![];
+        if let Ok(keyset_policy) = db::get_keyset_policy(&self.request.id) {
+            policies.push(keyset_policy);
+        }
 
-        if let std::result::Result::Ok(secrets) = db::get_keyset_ids(&self.request.id) {
+        if let Ok(secrets) = db::get_keyset_ids(&self.request.id) {
             for s in secrets {
-                policies.push(db::get_secret_policy(&s).unwrap());
+                if let Some(policy) = db::get_secret_policy(&s) {
+                    policies.push(policy);
+                }
             }
         }
 
@@ -192,7 +198,9 @@ mod tests {
             id: secret_id.clone(),
         };
 
-        let secret_value = "dGVzdCBzZWNyZXQ=".to_string(); // "test secret" -> b64
+        let secret = "test secret";
+        let secret_value = base64::encode(secret);
+
         let secret_bytes = base64::decode(&secret_value).unwrap();
 
         db::insert_secret_only(&secret_id, &secret_value).unwrap();
@@ -202,6 +210,40 @@ mod tests {
         assert_eq!(secret_key.guid(), &guid);
         assert_eq!(secret_bytes, secret_key.payload().unwrap());
 
+        db::delete_secret(&secret_id).unwrap();
+    }
+
+    #[test]
+    fn test_secret_bundle() {
+        let secret_id = Uuid::new_v4().to_hyphenated().to_string();
+        let bundle_id = Uuid::new_v4().to_hyphenated().to_string();
+        let guid = "2cf13667-ea72-4013-9dd6-155e89c5a28f".to_string();
+        let request = RequestDetails {
+            guid: guid.clone(),
+            format: "json".to_string(),
+            secret_type: "bundle".to_string(),
+            id: bundle_id.clone(),
+        };
+
+        let secret = "test secret";
+        let secret_value = base64::encode(secret);
+
+        db::insert_secret_only(&secret_id, &secret_value).unwrap();
+        db::insert_keyset_only(&bundle_id, &[secret_id.clone()]).unwrap();
+
+        let secret_bundle = SecretBundle { request };
+        assert!(secret_bundle.policies().is_empty());
+        assert_eq!(secret_bundle.guid(), &guid);
+        let mut expected_payload = HashMap::new();
+        expected_payload.insert(&secret_id, &secret_value);
+        assert_eq!(
+            secret_bundle.payload().unwrap(),
+            serde_json::to_string(&expected_payload)
+                .unwrap()
+                .into_bytes()
+        );
+
+        db::delete_keyset(&bundle_id).unwrap();
         db::delete_secret(&secret_id).unwrap();
     }
 
