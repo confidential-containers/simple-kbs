@@ -186,10 +186,26 @@ pub fn insert_keyset(ksetid: &str, kskeys: &[String], polid: u32) -> Result<()> 
                     VALUES(?, ?, ?)"
         .to_string();
 
-    /* create JSON for vector struct member variables */
+    // Create JSON for vector struct member variables
     let kskeys_str = serde_json::to_string(kskeys)?;
 
     trnsx.exec_drop(mysqlstr, (ksetid, &kskeys_str, polid))?;
+    trnsx.commit()?;
+    Ok(())
+}
+
+pub fn insert_keyset_only(ksetid: &str, kskeys: &[String]) -> Result<()> {
+    let mut dbconn = get_dbconn()?;
+    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
+
+    let mysqlstr = "INSERT INTO keysets (keysetid, kskeys)
+                    VALUES(?, ?)"
+        .to_string();
+
+    // Create JSON for vector struct member variables
+    let kskeys_str = serde_json::to_string(kskeys)?;
+
+    trnsx.exec_drop(mysqlstr, (ksetid, &kskeys_str))?;
     trnsx.commit()?;
     Ok(())
 }
@@ -198,8 +214,6 @@ pub fn delete_keyset(ksetid: &str) -> Result<()> {
     let mut dbconn = get_dbconn()?;
     let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
     let mysqlstr = "DELETE from keysets WHERE keysetid = ?".to_string();
-
-    /* create JSON for vector struct member variables */
 
     trnsx.exec_drop(mysqlstr, (ksetid,))?;
     trnsx.commit()?;
@@ -210,7 +224,7 @@ pub fn get_keyset_policy(keysetid: &str) -> Result<policy::Policy> {
     let mut dbconn = get_dbconn()?;
     let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
 
-    let mqstr = "SELECT polid FROM keysets WHERE keysetid = ?";
+    let mqstr = "SELECT polid FROM keysets WHERE keysetid = ? AND polid NOT NULL";
 
     let keyset_policy_opt: Option<u64> = trnsx.exec_first(mqstr, (keysetid,))?;
     let keyset_policy_id = keyset_policy_opt
