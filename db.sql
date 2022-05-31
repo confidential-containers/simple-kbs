@@ -52,7 +52,7 @@ CREATE TABLE `keysets` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `keysetid` varchar(50) NOT NULL,
   `kskeys` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,
-  `polid` int(11) NOT NULL,
+  `polid` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `key keyset_id` (`keysetid`)
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8;
