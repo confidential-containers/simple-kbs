@@ -165,17 +165,18 @@ pub fn get_connection(uuid: Uuid) -> Result<Connection> {
     Ok(conres[0].clone())
 }
 
-pub fn get_secret_policy(sec: &str) -> Option<policy::Policy> {
-    let mut dbconn = get_dbconn().ok()?;
-    let mut trnsx = dbconn.start_transaction(TxOpts::default()).ok()?;
+pub fn get_secret_policy(secret_id: &str) -> Result<Option<policy::Policy>> {
+    let mut dbconn = get_dbconn()?;
+    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
 
-    let mqstr = "SELECT polid FROM secrets WHERE secret_id = ?";
+    let mqstr = "SELECT polid FROM secrets WHERE polid IS NOT NULL AND secret_id = ?";
+    let policy_id: Option<u64> = trnsx.exec_first(mqstr, (secret_id,))?;
 
-    let val_row: mysql::Row = trnsx.exec_first(mqstr, (sec,)).ok()?.unwrap();
-
-    let val = mysql::from_value_opt::<u64>(val_row["polid"].clone()).ok()?;
-    let secret_policy = get_policy(val).ok()?;
-    Some(secret_policy)
+    if let Some(id) = policy_id {
+        Ok(Some(get_policy(id)?))
+    } else {
+        Ok(None)
+    }
 }
 
 pub fn insert_keyset(ksetid: &str, kskeys: &[String], polid: u32) -> Result<()> {
@@ -220,19 +221,19 @@ pub fn delete_keyset(ksetid: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn get_keyset_policy(keysetid: &str) -> Result<policy::Policy> {
+pub fn get_keyset_policy(keysetid: &str) -> Result<Option<policy::Policy>> {
     let mut dbconn = get_dbconn()?;
     let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
 
-    let mqstr = "SELECT polid FROM keysets WHERE keysetid = ? AND polid NOT NULL";
+    let mqstr = "SELECT polid FROM keysets WHERE keysetid = ? AND polid IS NOT NULL";
 
-    let keyset_policy_opt: Option<u64> = trnsx.exec_first(mqstr, (keysetid,))?;
-    let keyset_policy_id = keyset_policy_opt
-        .ok_or_else(|| anyhow!("db::get_keyset_policy- error no policy id for keyset_id"))?;
+    let policy_id: Option<u64> = trnsx.exec_first(mqstr, (keysetid,))?;
 
-    let retpol = get_policy(keyset_policy_id)?;
-
-    Ok(retpol)
+    if let Some(id) = policy_id {
+        Ok(Some(get_policy(id)?))
+    } else {
+        Ok(None)
+    }
 }
 
 // A keyset is just a group of keys. This function returns a vector of key ids for secrets in table secrets
@@ -386,7 +387,7 @@ mod tests {
 
         insert_secret(&secid_uuid, &sec_uuid, tpid)?;
 
-        let testpol = get_secret_policy(&secid_uuid)
+        let testpol = get_secret_policy(&secid_uuid)?
             .ok_or(anyhow!("db::test_secret_policy- no policy returned"))?;
 
         assert_eq!(
