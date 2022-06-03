@@ -5,6 +5,7 @@
 // Parse Secret Requests
 
 use anyhow::*;
+use log::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::result::Result::Ok;
@@ -121,8 +122,17 @@ impl SecretType for SecretKey {
 
     fn policies(&self) -> Vec<policy::Policy> {
         match db::get_secret_policy(&self.request.id) {
-            Some(p) => vec![p],
-            None => vec![],
+            Ok(policy) => match policy {
+                Some(p) => vec![p],
+                None => vec![],
+            },
+            Err(e) => {
+                error!(
+                    "Error getting policy for secret with id {}. Details: {}",
+                    &self.request.id, e
+                );
+                vec![]
+            }
         }
     }
 
@@ -159,16 +169,40 @@ impl SecretType for SecretBundle {
         Ok(serde_json::to_string(&bundle)?.into_bytes())
     }
 
+    // Policies are calculated before the measurement is validated.
+    // Since the guest/client is not trusted at this point, errors are
+    // not reported to it. Thus, this method does not return a result.
     fn policies(&self) -> Vec<policy::Policy> {
         let mut policies = vec![];
-        if let Ok(keyset_policy) = db::get_keyset_policy(&self.request.id) {
-            policies.push(keyset_policy);
+
+        match db::get_keyset_policy(&self.request.id) {
+            Ok(policy) => {
+                if let Some(p) = policy {
+                    policies.push(p)
+                }
+            }
+            Err(e) => {
+                error!(
+                    "Error getting policy for keyset with id {}. Details: {}",
+                    &self.request.id, e
+                )
+            }
         }
 
         if let Ok(secrets) = db::get_keyset_ids(&self.request.id) {
             for s in secrets {
-                if let Some(policy) = db::get_secret_policy(&s) {
-                    policies.push(policy);
+                match db::get_secret_policy(&s) {
+                    Ok(policy) => {
+                        if let Some(p) = policy {
+                            policies.push(p)
+                        }
+                    }
+                    Err(e) => {
+                        error!(
+                            "Error getting policy for secret with id {}. Details: {}",
+                            &s, e
+                        )
+                    }
                 }
             }
         }
