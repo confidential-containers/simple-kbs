@@ -62,10 +62,11 @@ Currently the secrets themselves are also stored in the database, although HSM i
 
 The database can be configured according to [db.sql](./db.sql).
 KBS is connected to database via environment variables.
-* `KBS_DB_HOST`
-* `KBS_DB_USER`
-* `KBS_DB_PW`
-* `KBS_DB`
+* `KBS_DB_TYPE`: Set this to the type of database that you are using for simple-kbs.  This can be mysql, postgres, or sqlite3.
+* `KBS_DB_HOST`: This should be set to the host running mysql or postgres database engines. Currently, this needs to be set for sqlite but is not used.
+* `KBS_DB_USER`: Mysql or postgres user with permissions to insert,update, and select data from the simple-kbs database. Currently, this needs to be set for sqlite but is not used.
+* `KBS_DB_PW`: Mysql or postgres password for `KBS_DB_USER`.  Currently, this needs to be set for sqlite but is not used.
+* `KBS_DB`: Name of the postgres or mysql database.  For sqlite, this is the path to the sqlite3 database.
 
 This KBS does not calculate the launch digest. The guest owner must calculate the launch digest ahead of time.
 The [sev-snp-measure](https://github.com/IBM/sev-snp-measure) tool can be used to calculate the launch digest of an SEV guest. For example:
@@ -86,3 +87,10 @@ Loosely based on [CCv0 SEV GOP script](https://github.com/confidential-container
 
 The [`tools/run_local_tests.sh`](tools/run_local_tests.sh) script creates a DB
 server container and runs the integration tests against it.
+# Simple Key Broker Server 
+
+`simple-kbs` is a self-contained Key Broker Server for pre-attestation.
+The code is currently being developed in the `staging` branch.
+
+## License
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fconfidential-containers%2Fsimple-kbs.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fconfidential-containers%2Fsimple-kbs?ref=badge_large)

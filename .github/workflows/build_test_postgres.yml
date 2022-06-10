@@ -1,0 +1,57 @@
+name: simple-kbs postgres tests
+
+on:
+  push:
+    branches: [ main, staging ]
+  pull_request:
+    branches: [ main, staging ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      KBS_DB_HOST: localhost
+      KBS_DB_USER: postgres
+      KBS_DB_PW: postgres
+      KBS_DB: simple_kbs
+      KBS_DB_TYPE: postgres 
+      PGPASSWORD: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_PORT: 5432
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: setup postgres
+        run: |
+          sudo systemctl start postgresql.service
+          sudo systemctl status -l postgresql.service
+          PGPASSWORD=${{env.PGPASSWORD}} psql -U ${{env.KBS_DB_USER}} -h ${{env.KBS_DB_HOST}} -c "CREATE DATABASE ${{env.KBS_DB}};"
+          PGPASSWORD=${{env.PGPASSWORD}} psql -U ${{env.KBS_DB_USER}} -h ${{env.KBS_DB_HOST}} ${{env.KBS_DB}} < db-postgres.sql
+
+      - name: cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
