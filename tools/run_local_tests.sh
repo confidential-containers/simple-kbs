@@ -14,6 +14,7 @@ export KBS_DB_HOST=127.0.0.1
 export KBS_DB_USER=root
 export KBS_DB_PW=root
 export KBS_DB=simple_kbs
+export KBS_DB_TYPE=mysql
 
 echo "+ Starting DB server container..."
 docker run --detach --rm \

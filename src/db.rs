@@ -7,13 +7,19 @@ use crate::policy;
 use crate::request;
 
 use anyhow::*;
+<<<<<<< HEAD
 use mysql::{OptsBuilder, Pool, PooledConn, TxOpts};
 use serde::{Deserialize, Serialize};
+=======
+>>>>>>> 4e8c96a (First commits to convert database handling to sqlx.)
 use std::env;
 use std::result::Result::Ok;
 use uuid::Uuid;
 
-use mysql::prelude::*;
+use serde::{Deserialize, Serialize};
+use sqlx::any::AnyPoolOptions;
+use sqlx::AnyPool;
+use sqlx::Row;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Connection {
@@ -38,28 +44,37 @@ impl Default for Connection {
     }
 }
 
-pub fn get_dbconn() -> Result<PooledConn> {
+pub async fn get_dbpool() -> Result<AnyPool> {
+    let db_type = env::var("KBS_DB_TYPE").expect("KBS_DB_TYPE not set");
     let host_name = env::var("KBS_DB_HOST").expect("KBS_DB_HOST not set");
     let user_name = env::var("KBS_DB_USER").expect("KBS_DB_USER not set.");
     let db_pw = env::var("KBS_DB_PW").expect("KBS_DB_PW not set.");
     let data_base = env::var("KBS_DB").expect("KBS_DB not set");
 
-    let opts = OptsBuilder::new()
-        .ip_or_hostname(Some(host_name))
-        .user(Some(user_name))
-        .pass(Some(db_pw))
-        .db_name(Some(data_base));
+    let db_url = format!(
+        "{}://{}:{}@{}/{}",
+        db_type, user_name, db_pw, host_name, data_base
+    );
 
-    let dbpool = Pool::new(opts)?;
-    let dbconn = dbpool.get_conn()?;
-    Ok(dbconn)
+    let db_pool = AnyPoolOptions::new()
+        .max_connections(1000)
+        .connect(&db_url)
+        .await
+        .map_err(|e| anyhow!("Encountered error trying to create a mysql pool: {}", e))?;
+    Ok(db_pool)
+    //    Ok(AnyPoolOptions::new()
+    //        .max_connections(1000)
+    //        .connect(&db_url)
+    //        .await
+    //        .map_err(|e| anyhow!("Encountered error trying to create a mysql pool: {}", e))?)
 }
 
-pub fn insert_connection(connection: Connection) -> Result<Uuid> {
-    let mut dbconn = get_dbconn()?;
+pub async fn insert_connection(connection: Connection) -> Result<Uuid> {
+    let dbpool = get_dbpool().await?;
 
     let nwuuid = Uuid::new_v4();
     let uuidstr = nwuuid.as_hyphenated().to_string();
+<<<<<<< HEAD
 
     let mqstr = "INSERT INTO conn_bundle (id, policy, fw_api_major, fw_api_minor,
                  fw_build_id, launch_description, fw_digest,create_date)
@@ -83,59 +98,62 @@ pub fn insert_connection(connection: Connection) -> Result<Uuid> {
     trnsx.commit()?;
     Ok(nwuuid)
 }
+=======
+>>>>>>> 4e8c96a (First commits to convert database handling to sqlx.)
 
-pub fn insert_policy(policy: &policy::Policy) -> Result<u64> {
-    let mut dbconn = get_dbconn()?;
+    let query = format!("insert into conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, create_date) VALUES(\"{}\", {}, {}, {}, {}, \"{}\", \"{}\", NOW())", 
+     uuidstr,
+     connection.policy,
+     connection.fw_api_major,
+     connection.fw_api_minor,
+     connection.fw_build_id,
+     connection.launch_description,
+     connection.fw_digest
+     );
 
-    let allowed_digests_json = serde_json::to_string(&policy.allowed_digests)?;
-    let allowed_policy_json = serde_json::to_string(&policy.allowed_policies)?;
-    let allowed_build_ids_json = serde_json::to_string(&policy.allowed_build_ids)?;
+    sqlx::query(query.as_str()).execute(&dbpool).await?;
 
-    let mysqlstr = format!(
-        "INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor,
-                               allowed_build_ids, create_date, valid)
-                               VALUES({:?}, {:?}, {}, {}, {:?}, NOW(), 1)",
-        allowed_digests_json,
-        allowed_policy_json,
-        policy.min_fw_api_major,
-        policy.min_fw_api_minor,
-        allowed_build_ids_json
-    );
-    dbconn.query::<u64, String>(mysqlstr)?;
-    Ok(dbconn.last_insert_id())
+    Ok(nwuuid)
 }
 
-pub fn get_policy(pid: u64) -> Result<policy::Policy> {
-    let mut dbconn = get_dbconn()?;
-    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
+pub async fn get_connection(uuid: Uuid) -> Result<Connection> {
+    let dbpool = get_dbpool().await?;
 
-    let mqstr = "SELECT allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids FROM policy WHERE id = ? AND valid = 1";
-    let polval: Vec<(String, String, u32, u32, String)> = trnsx.exec(mqstr, (pid,))?;
-    Ok(policy::Policy {
-        allowed_digests: serde_json::from_str(&polval[0].0).unwrap(),
-        allowed_policies: serde_json::from_str(&polval[0].1).unwrap(),
-        min_fw_api_major: polval[0].2,
-        min_fw_api_minor: polval[0].3,
-        allowed_build_ids: serde_json::from_str(&polval[0].4).unwrap(),
+    let uuidstr = uuid.as_hyphenated().to_string();
+    let query = format!("SELECT policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest FROM conn_bundle WHERE id = \"{}\"", uuidstr);
+
+    let con_row = sqlx::query(query.as_str()).fetch_one(&dbpool).await?;
+
+    Ok(Connection {
+        policy: con_row.try_get::<i32, _>(0)? as u32,
+        fw_api_major: con_row.try_get::<i32, _>(1)? as u32,
+        fw_api_minor: con_row.try_get::<i32, _>(2)? as u32,
+        fw_build_id: con_row.try_get::<i32, _>(3)? as u32,
+        launch_description: con_row.try_get::<String, _>(4)?,
+        fw_digest: con_row.try_get::<String, _>(5)?,
     })
 }
 
-pub fn delete_policy(pid: &u64) -> Result<()> {
-    let mut dbconn = get_dbconn()?;
+pub async fn delete_connection(uuid: Uuid) -> Result<Uuid> {
+    let dbpool = get_dbpool().await?;
 
-    let mqstr = "DELETE from policy WHERE id = ?";
+    let query = format!(
+        "DELETE from conn_bundle WHERE id = \"{}\"",
+        uuid.as_hyphenated()
+    );
 
-    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
-    trnsx.exec_drop(mqstr, (&pid,))?;
-    trnsx.commit()?;
-    Ok(())
+    sqlx::query(query.as_str()).execute(&dbpool).await?;
+    Ok(uuid)
 }
 
-pub fn delete_connection(uuid: Uuid) -> Result<Uuid> {
-    let mut dbconn = get_dbconn()?;
+pub async fn insert_policy(policy: &policy::Policy) -> Result<u64> {
+    let dbpool = get_dbpool().await?;
 
-    let mqstr = "DELETE from conn_bundle WHERE id = ?";
+    //let allowed_digests_json = serde_json::to_string(&policy.allowed_digests)?;
+    //let allowed_policy_json = serde_json::to_string(&policy.allowed_policies)?;
+    //let allowed_build_ids_json = serde_json::to_string(&policy.allowed_build_ids)?;
 
+<<<<<<< HEAD
     let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
     trnsx.exec_drop(mqstr, (uuid.as_hyphenated().to_string(),))?;
     trnsx.commit()?;
@@ -183,67 +201,138 @@ pub fn get_secret_policy(secret_id: &str) -> Result<Option<policy::Policy>> {
 pub fn insert_keyset(ksetid: &str, kskeys: &[String], polid: Option<u32>) -> Result<()> {
     let mut dbconn = get_dbconn()?;
     let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
+=======
+    let query = format!(
+        "INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(\'{:?}\', \'{:?}\', {}, {}, \'{:?}\', NOW(), 1)",
+        policy.allowed_digests,
+        policy.allowed_policies,
+        policy.min_fw_api_major,
+        policy.min_fw_api_minor,
+        policy.allowed_build_ids
+    );
 
-    let mysqlstr = "INSERT INTO keysets (keysetid, kskeys, polid)
-                    VALUES(?, ?, ?)"
-        .to_string();
+    let last_insert_row = sqlx::query(query.as_str())
+        .execute(&dbpool)
+        .await?
+        .last_insert_id();
+
+    let last_insert_id = last_insert_row.unwrap();
+
+    Ok(last_insert_id as u64)
+}
+
+pub async fn get_policy(pid: u64) -> Result<policy::Policy> {
+    let dbpool = get_dbpool().await?;
+
+    let query = format!("SELECT allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids FROM policy WHERE id = {} AND valid = 1", pid);
+    let row_vec = sqlx::query(query.as_str()).fetch_one(&dbpool).await?;
+    Ok(policy::Policy {
+        allowed_digests: serde_json::from_str(&row_vec.try_get::<String, _>(0)?).unwrap(),
+        allowed_policies: serde_json::from_str(&row_vec.try_get::<String, _>(1)?).unwrap(),
+        min_fw_api_major: row_vec.try_get::<i32, _>(2)? as u32,
+        min_fw_api_minor: row_vec.try_get::<i32, _>(3)? as u32,
+        allowed_build_ids: serde_json::from_str(&row_vec.try_get::<String, _>(4)?).unwrap(),
+    })
+}
+
+pub async fn get_secret_policy(sec: &str) -> Result<policy::Policy> {
+    let dbpool = get_dbpool().await?;
+
+    let query = format!("SELECT polid FROM secrets WHERE secret_id = \'{}\'", sec);
+
+    let val_row = sqlx::query(query.as_str()).fetch_one(&dbpool).await?;
+
+    let val = val_row.try_get::<i32, _>(0)? as u64;
+    let secret_policy = get_policy(val).await?;
+    Ok(secret_policy)
+}
+
+pub async fn delete_policy(pid: &u64) -> Result<()> {
+    let dbpool = get_dbpool().await?;
+
+    let query = format!("DELETE from policy WHERE id = {}", pid);
+    sqlx::query(query.as_str()).execute(&dbpool).await?;
+    Ok(())
+}
+>>>>>>> 4e8c96a (First commits to convert database handling to sqlx.)
+
+pub async fn insert_keyset(ksetid: &str, kskeys: &[String], polid: Option<u32>) -> Result<()> {
+    let dbpool = get_dbpool().await?;
 
     // Create JSON for vector struct member variables
     let kskeys_str = serde_json::to_string(kskeys)?;
 
-    trnsx.exec_drop(mysqlstr, (ksetid, &kskeys_str, polid))?;
-    trnsx.commit()?;
+    let query = match polid {
+        Some(p) => format!(
+            "INSERT INTO keysets (keysetid, kskeys, polid) VALUES(\'{}\', \'{}\', {})",
+            ksetid, kskeys_str, p
+        ),
+        None => format!(
+            "INSERT INTO keysets (keysetid, kskeys) VALUES( \'{}\', \'{}\')",
+            ksetid, kskeys_str
+        ),
+    };
+
+    sqlx::query(query.as_str()).execute(&dbpool).await?;
+
     Ok(())
 }
 
-pub fn delete_keyset(ksetid: &str) -> Result<()> {
-    let mut dbconn = get_dbconn()?;
-    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
-    let mysqlstr = "DELETE from keysets WHERE keysetid = ?".to_string();
+pub async fn delete_keyset(ksetid: &str) -> Result<()> {
+    let dbpool = get_dbpool().await?;
 
-    trnsx.exec_drop(mysqlstr, (ksetid,))?;
-    trnsx.commit()?;
+    /* create JSON for vector struct member variables */
+
+    let query = format!("DELETE from keysets WHERE keysetid = \'{}\'", ksetid);
+
+    sqlx::query(query.as_str()).execute(&dbpool).await?;
+
     Ok(())
 }
 
-pub fn get_keyset_policy(keysetid: &str) -> Result<Option<policy::Policy>> {
-    let mut dbconn = get_dbconn()?;
-    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
+pub async fn get_keyset_policy(keysetid: &str) -> Result<policy::Policy> {
+    let dbpool = get_dbpool().await?;
 
-    let mqstr = "SELECT polid FROM keysets WHERE keysetid = ? AND polid IS NOT NULL";
+    let query = format!(
+        "SELECT polid FROM keysets WHERE keysetid = \'{}\'",
+        keysetid
+    );
 
-    let policy_id: Option<u64> = trnsx.exec_first(mqstr, (keysetid,))?;
+    let polid_row = sqlx::query(query.as_str()).fetch_one(&dbpool).await?;
 
-    if let Some(id) = policy_id {
-        Ok(Some(get_policy(id)?))
-    } else {
-        Ok(None)
-    }
+    let keyset_policy_id = polid_row.try_get::<i32, _>(0)? as u64;
+
+    let retpol = get_policy(keyset_policy_id).await?;
+
+    Ok(retpol)
 }
 
-// A keyset is just a group of keys. This function returns a vector of key ids for secrets in table secrets
-pub fn get_keyset_ids(keysetid: &str) -> Result<Vec<String>> {
-    let mut dbconn = get_dbconn()?;
-    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
+pub async fn get_keyset_ids(keyset_id: &str) -> Result<Vec<String>> {
+    let dbpool = get_dbpool().await?;
 
-    let mqstr = "SELECT kskeys FROM keysets WHERE keysetid = ?";
-    let keyset_json_opt: Option<String> = trnsx.exec_first(mqstr, (keysetid,))?;
-    let keyset_json_str =
-        keyset_json_opt.ok_or_else(|| anyhow!("db::get_keyset_ids- keyset id not found"))?;
+    let query = format!(
+        "SELECT kskeys FROM keysets WHERE keysetid = \'{}\'",
+        keyset_id
+    );
 
-    let rks: Vec<String> = serde_json::from_str(&keyset_json_str).unwrap();
+    let keyset_row = sqlx::query(query.as_str()).fetch_one(&dbpool).await?;
+
+    let rks: Vec<String> = serde_json::from_str(&keyset_row.try_get::<String, _>(0)?).unwrap();
 
     Ok(rks)
 }
 
-pub fn get_secret(secret_id: &str) -> Result<request::Key> {
-    let mut dbconn = get_dbconn()?;
-    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
+pub async fn get_secret(secret_id: &str) -> Result<request::Key> {
+    let dbpool = get_dbpool().await?;
 
-    let mqstr = "SELECT secret FROM secrets WHERE secret_id = ?";
-    let val: Option<String> = trnsx.exec_first(mqstr, (secret_id,))?;
+    let query = format!(
+        "SELECT secret FROM secrets WHERE secret_id = \'{}\'",
+        secret_id
+    );
 
-    let payload = val.ok_or_else(|| anyhow!("secret not found."))?;
+    let payload_row = sqlx::query(query.as_str()).fetch_one(&dbpool).await?;
+
+    let payload = payload_row.try_get::<String, _>(0)?;
 
     Ok(request::Key {
         id: secret_id.to_string(),
@@ -251,27 +340,32 @@ pub fn get_secret(secret_id: &str) -> Result<request::Key> {
     })
 }
 
-pub fn insert_secret(secret_id: &str, secret: &str, policy_id: Option<u64>) -> Result<()> {
-    let mut dbconn = get_dbconn()?;
+pub async fn insert_secret(secret_id: &str, secret: &str, policy_id: Option<u64>) -> Result<()> {
+    let dbpool = get_dbpool().await?;
 
-    let mqstr = "INSERT INTO secrets (secret_id, secret, polid ) VALUES(?, ?, ?)";
+    let query = match policy_id {
+        Some(p) => format!(
+            "INSERT INTO secrets (secret_id, secret, polid ) VALUES(\'{}\', \'{}\', {:?})",
+            secret_id, secret, p
+        ),
+        None => format!(
+            "INSERT INTO secrets (secret_id, secret ) VALUES(\'{}\', \'{}\')",
+            secret_id, secret
+        ),
+    };
 
-    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
+    sqlx::query(query.as_str()).execute(&dbpool).await?;
 
-    trnsx.exec_drop(mqstr, (&secret_id, &secret, &policy_id))?;
-    trnsx.commit()?;
     Ok(())
 }
 
-pub fn delete_secret(secret_id: &str) -> Result<()> {
-    let mut dbconn = get_dbconn()?;
+pub async fn delete_secret(secret_id: &str) -> Result<()> {
+    let dbpool = get_dbpool().await?;
 
-    let mqstr = "DELETE from secrets WHERE secret_id = ?";
+    let query = format!("DELETE from secrets WHERE secret_id = \'{}\'", secret_id);
 
-    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
+    sqlx::query(query.as_str()).execute(&dbpool).await?;
 
-    trnsx.exec_drop(mqstr, (secret_id,))?;
-    trnsx.commit()?;
     Ok(())
 }
 
@@ -329,24 +423,97 @@ pub fn get_signing_keys_policy(key_id: &str) -> Result<Option<policy::Policy>> {
     }
 }
 
+    Ok(())
+}
+
+// ------------------------------------------------------------------------------------
+
+pub async fn insert_report_keypair(id: &str, keypair: &[u8], policy_id: Option<u64>) -> Result<()> {
+    let dbpool = get_dbpool().await?;
+
+    let keypair_b64 = base64::encode(&keypair);
+
+    let query = match policy_id {
+        Some(p) => format!(
+            "INSERT INTO report_keypair (key_id, keypair, polid) VALUES(\'{}\', \'{}\', {:?})",
+            id, keypair_b64, p
+        ),
+        None => format!(
+            "INSERT INTO report_keypair (key_id, keypair) VALUES(\'{}\', \'{}\')",
+            id, keypair_b64
+        ),
+    };
+
+    sqlx::query(query.as_str()).execute(&dbpool).await?;
+
+    Ok(())
+}
+
+pub async fn get_report_keypair(id: &str) -> Result<Vec<u8>> {
+    let dbpool = get_dbpool().await?;
+
+    let query = format!(
+        "SELECT keypair FROM report_keypair WHERE key_id = \'{}\'",
+        id
+    );
+
+    let keys_row = sqlx::query(query.as_str()).fetch_one(&dbpool).await?;
+
+    let kp = keys_row.try_get::<String, _>(0)?;
+    let kp_bytes = base64::decode(&kp)?;
+
+    Ok(kp_bytes)
+}
+
+pub async fn delete_report_keypair(key_id: &str) -> Result<()> {
+    let dbpool = get_dbpool().await?;
+
+    let query = format!("DELETE FROM report_keypair WHERE key_id = \'{}\'", key_id);
+
+    sqlx::query(query.as_str()).execute(&dbpool).await?;
+
+    Ok(())
+}
+
+pub async fn get_signing_keys_policy(key_id: &str) -> Result<Option<policy::Policy>> {
+    let dbpool = get_dbpool().await?;
+
+    let query = format!(
+        "SELECT polid FROM report_keypair WHERE key_id = \'{}\' AND polid IS NOT NULL",
+        key_id
+    );
+
+    let policy_id_row = sqlx::query(query.as_str()).fetch_one(&dbpool).await?;
+
+    let policy_id = policy_id_row.try_get::<i32, _>(0)? as u64;
+    Ok(Some(get_policy(policy_id).await?))
+}
+
+// -----------------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    macro_rules! aw {
+        ($e:expr) => {
+            tokio_test::block_on($e)
+        };
+    }
 
     #[test]
     fn test_connection() -> anyhow::Result<()> {
         let testconn = Connection::default();
 
-        let tid = insert_connection(testconn.clone())?;
+        let tid = aw!(insert_connection(testconn.clone()))?;
 
-        let resconn = get_connection(tid.clone())?;
+        let resconn = aw!(get_connection(tid.clone()))?;
 
         assert_eq!(testconn.policy, resconn.policy);
         assert_eq!(testconn.fw_api_major, resconn.fw_api_major);
         assert_eq!(testconn.fw_api_minor, resconn.fw_api_minor);
         assert_eq!(testconn.fw_build_id, resconn.fw_build_id);
         assert_eq!(testconn.launch_description, resconn.launch_description);
-        let _dconid = delete_connection(tid.clone());
+        let _dconid = aw!(delete_connection(tid.clone()))?;
 
         Ok(())
     }
@@ -361,9 +528,9 @@ mod tests {
             allowed_build_ids: vec![0u32, 1u32, 2u32],
         };
 
-        let polid = insert_policy(&testpol)?;
+        let polid = aw!(insert_policy(&testpol))?;
 
-        let rpol = get_policy(polid)?;
+        let rpol = aw!(get_policy(polid))?;
 
         for j in 0..2 {
             assert_eq!(
@@ -389,7 +556,7 @@ mod tests {
             );
         }
 
-        delete_policy(&polid)?;
+        aw!(delete_policy(&polid))?;
         Ok(())
     }
 
@@ -407,15 +574,18 @@ mod tests {
             allowed_build_ids: vec![0u32, 1u32, 2u32],
         };
 
-        let tpid = insert_policy(&tinspol)?;
+        let tpid = aw!(insert_policy(&tinspol))?;
 
         let secid_uuid = Uuid::new_v4().as_hyphenated().to_string();
         let sec_uuid = Uuid::new_v4().as_hyphenated().to_string();
 
-        insert_secret(&secid_uuid, &sec_uuid, Some(tpid))?;
+        aw!(insert_secret(
+            &secid_uuid,
+            &sec_uuid,
+            Option::<u64>::Some(tpid)
+        ))?;
 
-        let testpol = get_secret_policy(&secid_uuid)?
-            .ok_or(anyhow!("db::test_secret_policy- no policy returned"))?;
+        let testpol = aw!(get_secret_policy(&secid_uuid))?;
 
         assert_eq!(
             testpol.allowed_digests[0],
@@ -434,14 +604,14 @@ mod tests {
         let secid = Uuid::new_v4().as_hyphenated().to_string();
         let sec = Uuid::new_v4().as_hyphenated().to_string();
         let polid = 0;
-        insert_secret(&secid, &sec, Some(polid))?;
+        aw!(insert_secret(&secid, &sec, Option::<u64>::Some(polid)))?;
 
-        let tkey = get_secret(&secid)?;
+        let tkey = aw!(get_secret(&secid))?;
 
         assert_eq!(tkey.id, secid);
         assert_eq!(tkey.payload, sec);
 
-        delete_secret(&secid)?;
+        aw!(delete_secret(&secid))?;
         Ok(())
     }
 
@@ -467,11 +637,15 @@ mod tests {
         ];
 
         let ksetid = Uuid::new_v4().as_hyphenated().to_string();
-        let polid = 1;
-        insert_keyset(&ksetid, &keys, Some(polid))?;
-        let keyset_ids = get_keyset_ids(&ksetid)?;
+        let polid: Option<u32> = Some(1);
+        aw!(insert_keyset(&ksetid, &keys, polid))?;
+
+        let keyset_ids = aw!(get_keyset_ids(&ksetid))?;
         assert_eq!(keyset_ids.len(), keys.len());
         assert_eq!(keyset_ids, keys);
+
+        aw!(delete_keyset(&ksetid))?;
+
         Ok(())
     }
 }
