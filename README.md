@@ -72,6 +72,9 @@ This KBS does not calculate the launch digest. The guest owner must calculate th
 This means that the guest firmware code does not need to be uploaded to the KBS and that SEV and SEV-ES launches follow an identical flow. 
 The downside is that the guest owner might have to generate more firmware digests ahead of time to account for variations in initrd or CPU count (for SEV-ES guests).
 
-
-
 Loosely based on [CCv0 SEV GOP script](https://github.com/confidential-containers-demo/scripts/tree/main/guest-owner-proxy).
+
+## Local development
+
+The [`tools/run_local_tests.sh`](tools/run_local_tests.sh) script creates a DB
+server container and runs the integration tests against it.
