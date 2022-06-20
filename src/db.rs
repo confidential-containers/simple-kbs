@@ -58,7 +58,7 @@ pub fn insert_connection(connection: Connection) -> Result<Uuid> {
     let mut dbconn = get_dbconn()?;
 
     let nwuuid = Uuid::new_v4();
-    let uuidstr = nwuuid.to_hyphenated().to_string();
+    let uuidstr = nwuuid.as_hyphenated().to_string();
 
     let mqstr = "INSERT INTO conn_bundle (id, policy, fw_api_major, fw_api_minor,
                  fw_build_id, launch_description, fw_digest,create_date)
@@ -136,7 +136,7 @@ pub fn delete_connection(uuid: Uuid) -> Result<Uuid> {
     let mqstr = "DELETE from conn_bundle WHERE id = ?";
 
     let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
-    trnsx.exec_drop(mqstr, (uuid.to_hyphenated().to_string(),))?;
+    trnsx.exec_drop(mqstr, (uuid.as_hyphenated().to_string(),))?;
     trnsx.commit()?;
     Ok(uuid)
 }
@@ -144,7 +144,7 @@ pub fn delete_connection(uuid: Uuid) -> Result<Uuid> {
 pub fn get_connection(uuid: Uuid) -> Result<Connection> {
     let mut dbconn = get_dbconn()?;
 
-    let uuidstr = uuid.to_hyphenated().to_string();
+    let uuidstr = uuid.as_hyphenated().to_string();
     let mqstr = "SELECT policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest FROM conn_bundle WHERE id = ?";
 
     let conres = dbconn.exec_map(
@@ -382,8 +382,8 @@ mod tests {
 
         let tpid = insert_policy(&tinspol)?;
 
-        let secid_uuid = Uuid::new_v4().to_hyphenated().to_string();
-        let sec_uuid = Uuid::new_v4().to_hyphenated().to_string();
+        let secid_uuid = Uuid::new_v4().as_hyphenated().to_string();
+        let sec_uuid = Uuid::new_v4().as_hyphenated().to_string();
 
         insert_secret(&secid_uuid, &sec_uuid, tpid)?;
 
@@ -404,8 +404,8 @@ mod tests {
 
     #[test]
     fn test_secrets() -> anyhow::Result<()> {
-        let secid = Uuid::new_v4().to_hyphenated().to_string();
-        let sec = Uuid::new_v4().to_hyphenated().to_string();
+        let secid = Uuid::new_v4().as_hyphenated().to_string();
+        let sec = Uuid::new_v4().as_hyphenated().to_string();
         let polid = 0;
         insert_secret(&secid, &sec, polid)?;
 
@@ -439,7 +439,7 @@ mod tests {
             "UmlwcGxlCg==".into(),
         ];
 
-        let ksetid = Uuid::new_v4().to_hyphenated().to_string();
+        let ksetid = Uuid::new_v4().as_hyphenated().to_string();
         let polid = 1;
         insert_keyset(&ksetid, &keys, polid)?;
         let keyset_ids = get_keyset_ids(&ksetid)?;

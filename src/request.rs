@@ -15,20 +15,8 @@ use crate::db;
 use crate::grpc::key_broker::RequestDetails;
 use crate::policy;
 
-// GUID that marks the beginning of the secret table:
-// 1e74f542-71dd-4d66-963e-ef4287ff173b
-const SECRET_GUID: Uuid = Uuid::from_bytes([
-    0x1e, 0x74, 0xf5, 0x42, 0x71, 0xdd, 0x4d, 0x66, 0x96, 0x3e, 0xef, 0x42, 0x87, 0xff, 0x17, 0x3b,
-]);
-
-fn uuid_bytes_le(u: &Uuid) -> [u8; 16] {
-    let b = u.as_bytes();
-    let r: [u8; 16] = [
-        b[3], b[2], b[1], b[0], b[5], b[4], b[7], b[6], b[8], b[9], b[10], b[11], b[12], b[13],
-        b[14], b[15],
-    ];
-    r
-}
+// GUID that marks the beginning of the secret table
+const SECRET_GUID: Uuid = uuid::uuid!("1e74f542-71dd-4d66-963e-ef4287ff173b");
 
 // Struct representing the entire request
 pub struct SecretRequest {
@@ -76,7 +64,7 @@ impl SecretRequest {
         for s in &self.secrets {
             let secret_payload = s.payload()?;
 
-            payload.extend_from_slice(&uuid_bytes_le(&Uuid::parse_str(s.guid()).unwrap()));
+            payload.extend_from_slice(&Uuid::parse_str(s.guid()).unwrap().to_bytes_le());
             payload.extend_from_slice(
                 &u32::try_from(secret_payload.len() + 20)
                     .unwrap()
@@ -88,7 +76,7 @@ impl SecretRequest {
 
         let mut secret_table = vec![];
 
-        secret_table.extend_from_slice(&uuid_bytes_le(&SECRET_GUID));
+        secret_table.extend_from_slice(&SECRET_GUID.to_bytes_le());
         secret_table.extend_from_slice(&u32::try_from(payload.len() + 20).unwrap().to_le_bytes());
         secret_table.extend_from_slice(&payload);
 
@@ -223,7 +211,7 @@ mod tests {
 
     #[test]
     fn test_secret_key() {
-        let secret_id = Uuid::new_v4().to_hyphenated().to_string();
+        let secret_id = Uuid::new_v4().as_hyphenated().to_string();
         let guid = "2cf13667-ea72-4013-9dd6-155e89c5a28f".to_string();
         let request = RequestDetails {
             guid: guid.clone(),
@@ -249,8 +237,8 @@ mod tests {
 
     #[test]
     fn test_secret_bundle() {
-        let secret_id = Uuid::new_v4().to_hyphenated().to_string();
-        let bundle_id = Uuid::new_v4().to_hyphenated().to_string();
+        let secret_id = Uuid::new_v4().as_hyphenated().to_string();
+        let bundle_id = Uuid::new_v4().as_hyphenated().to_string();
         let guid = "2cf13667-ea72-4013-9dd6-155e89c5a28f".to_string();
         let request = RequestDetails {
             guid: guid.clone(),
@@ -283,7 +271,7 @@ mod tests {
 
     #[test]
     fn test_request_parsing() {
-        let secret_id = Uuid::new_v4().to_hyphenated().to_string();
+        let secret_id = Uuid::new_v4().as_hyphenated().to_string();
         let guid = "2cf13667-ea72-4013-9dd6-155e89c5a28f".to_string();
         let request = RequestDetails {
             guid: guid.clone(),
@@ -323,9 +311,9 @@ mod tests {
         }
 
         let expected_payload = ExpectedPayload {
-            table_guid: uuid_bytes_le(&SECRET_GUID),
+            table_guid: SECRET_GUID.to_bytes_le(),
             table_length: 51, // does not include padding
-            secret_guid: uuid_bytes_le(&Uuid::parse_str(&guid).unwrap()),
+            secret_guid: Uuid::parse_str(&guid).unwrap().to_bytes_le(),
             secret_length: 31, // payload size + header size
             secret_payload: secret_bytes.try_into().unwrap(),
             padding: [0u8; 13],
