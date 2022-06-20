@@ -68,8 +68,16 @@ KBS is connected to database via environment variables.
 * `KBS_DB`
 
 This KBS does not calculate the launch digest. The guest owner must calculate the launch digest ahead of time.
-[This script](tools/calculate_sev_launch_digest.py) can be used to calculate the launch digest of an SEV guest.
-This means that the guest firmware code does not need to be uploaded to the KBS and that SEV and SEV-ES launches follow an identical flow. 
+The [sev-snp-measure](https://github.com/IBM/sev-snp-measure) tool can be used to calculate the launch digest of an SEV guest. For example:
+
+    $ sev-snp-measure -v --mode=sev --output-format=base64 \
+                      --ovmf=OVMF.fd                       \
+                      --kernel=vmlinuz                     \
+                      --initrd=kata-containers-initrd.img  \
+                      --append="console=ttyS0 loglevel=6"
+    Calculated SEV guest measurement: XAI+mQvk/x/kCyHprKj3K7zmXmdm+/7SfpG9AUDWIMQ=
+
+This means that the guest firmware code does not need to be uploaded to the KBS and that SEV and SEV-ES launches follow an identical flow.
 The downside is that the guest owner might have to generate more firmware digests ahead of time to account for variations in initrd or CPU count (for SEV-ES guests).
 
 
