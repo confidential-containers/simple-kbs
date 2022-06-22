@@ -35,11 +35,11 @@ pub fn generate_launch_bundle(
 }
 
 pub fn verify_measurement(
-    connection: db::Connection,
+    connection: &db::Connection,
     launch_measurement: String,
     session: Session<Initialized>,
 ) -> Result<Session<Verified>> {
-    let digest = base64::decode(connection.fw_digest)?;
+    let digest = base64::decode(&connection.fw_digest)?;
 
     let build = Build {
         version: Version {

@@ -6,6 +6,7 @@
 
 use anyhow::*;
 use log::*;
+use ring::{rand::SystemRandom, signature};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::result::Result::Ok;
@@ -40,6 +41,7 @@ impl SecretRequest {
             let secret: Box<dyn SecretType> = match &r.secret_type[..] {
                 "bundle" => Box::new(SecretBundle { request: r.clone() }),
                 "key" => Box::new(SecretKey { request: r.clone() }),
+                "report" => Box::new(SecretReport { request: r.clone() }),
                 _ => return Err(anyhow!("Unknown Secret Type")),
             };
 
@@ -58,11 +60,11 @@ impl SecretRequest {
         policies
     }
 
-    pub fn payload(&self) -> Result<Vec<u8>> {
+    pub fn payload(&self, connection: &db::Connection) -> Result<Vec<u8>> {
         let mut payload = vec![];
 
         for s in &self.secrets {
-            let secret_payload = s.payload()?;
+            let secret_payload = s.payload(connection.clone())?;
 
             payload.extend_from_slice(&Uuid::parse_str(s.guid()).unwrap().to_bytes_le());
             payload.extend_from_slice(
@@ -89,7 +91,7 @@ impl SecretRequest {
 }
 
 trait SecretType {
-    fn payload(&self) -> Result<Vec<u8>>;
+    fn payload(&self, connection: db::Connection) -> Result<Vec<u8>>;
     fn policies(&self) -> Vec<policy::Policy>;
     fn guid(&self) -> &String;
 }
@@ -99,7 +101,8 @@ struct SecretKey {
 }
 
 impl SecretType for SecretKey {
-    fn payload(&self) -> Result<Vec<u8>> {
+    #[allow(unused_variables)]
+    fn payload(&self, connection: db::Connection) -> Result<Vec<u8>> {
         let key = db::get_secret(&self.request.id)?;
         Ok(match &self.request.format[..] {
             "binary" => key.into_bytes(),
@@ -146,7 +149,8 @@ struct SecretBundle {
 }
 
 impl SecretType for SecretBundle {
-    fn payload(&self) -> Result<Vec<u8>> {
+    #[allow(unused_variables)]
+    fn payload(&self, connection: db::Connection) -> Result<Vec<u8>> {
         let mut bundle = HashMap::new();
 
         let secrets = db::get_keyset_ids(&self.request.id)?;
@@ -203,16 +207,82 @@ impl SecretType for SecretBundle {
     }
 }
 
+/*
+ * The Report secret type is a signed copy of the connection.
+ *
+ * A KBC can use this to prove that the guest verified by the KBS
+ * and was launched with certain parameters.
+ */
+
+struct SecretReport {
+    request: RequestDetails,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Report {
+    connection: String,
+    signature: String,
+}
+
+impl SecretType for SecretReport {
+    fn payload(&self, connection: db::Connection) -> Result<Vec<u8>> {
+        let rng = SystemRandom::new();
+
+        let key_pair_pkcs8 = db::get_report_keypair(&self.request.id)?;
+        let key_pair = signature::EcdsaKeyPair::from_pkcs8(
+            &signature::ECDSA_P256_SHA256_ASN1_SIGNING,
+            &key_pair_pkcs8,
+        )
+        .map_err(|_| anyhow!("Failed to load keypair"))?;
+
+        let connection_string = serde_json::to_string(&connection)?;
+        let connection_bytes = connection_string.clone().into_bytes();
+
+        let signature = key_pair
+            .sign(&rng, &connection_bytes)
+            .map_err(|_| anyhow!("Failed to sign connection."))?;
+
+        let report = Report {
+            connection: connection_string,
+            signature: base64::encode(signature.as_ref()),
+        };
+
+        Ok(serde_json::to_vec(&report)?)
+    }
+
+    fn policies(&self) -> Vec<policy::Policy> {
+        match db::get_signing_keys_policy(&self.request.id) {
+            Ok(policy) => match policy {
+                Some(p) => vec![p],
+                None => vec![],
+            },
+            Err(e) => {
+                error!(
+                    "Error getting policy for secret with id {}. Details: {}",
+                    &self.request.id, e
+                );
+                vec![]
+            }
+        }
+    }
+
+    fn guid(&self) -> &String {
+        &self.request.guid
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db;
     use crate::grpc::key_broker::RequestDetails;
+    use ring::signature::KeyPair;
 
     #[test]
     fn test_secret_key() {
         let secret_id = Uuid::new_v4().as_hyphenated().to_string();
         let guid = "2cf13667-ea72-4013-9dd6-155e89c5a28f".to_string();
+        let connection = db::Connection::default();
         let request = RequestDetails {
             guid: guid.clone(),
             format: "binary".to_string(),
@@ -230,7 +300,7 @@ mod tests {
         let secret_key = SecretKey { request };
         assert!(secret_key.policies().is_empty());
         assert_eq!(secret_key.guid(), &guid);
-        assert_eq!(secret_bytes, secret_key.payload().unwrap());
+        assert_eq!(secret_bytes, secret_key.payload(connection).unwrap());
 
         db::delete_secret(&secret_id).unwrap();
     }
@@ -240,6 +310,7 @@ mod tests {
         let secret_id = Uuid::new_v4().as_hyphenated().to_string();
         let bundle_id = Uuid::new_v4().as_hyphenated().to_string();
         let guid = "2cf13667-ea72-4013-9dd6-155e89c5a28f".to_string();
+        let connection = db::Connection::default();
         let request = RequestDetails {
             guid: guid.clone(),
             format: "json".to_string(),
@@ -259,7 +330,7 @@ mod tests {
         let mut expected_payload = HashMap::new();
         expected_payload.insert(&secret_id, &secret_value);
         assert_eq!(
-            secret_bundle.payload().unwrap(),
+            secret_bundle.payload(connection).unwrap(),
             serde_json::to_string(&expected_payload)
                 .unwrap()
                 .into_bytes()
@@ -270,9 +341,65 @@ mod tests {
     }
 
     #[test]
+    fn test_report() {
+        // setup test state
+        let guid = "2cf13667-ea72-4013-9dd6-155e89c5a28f".to_string();
+        let kid = "test-keypair".to_string();
+
+        let rng = SystemRandom::new();
+        let pkcs8_bytes = signature::EcdsaKeyPair::generate_pkcs8(
+            &signature::ECDSA_P256_SHA256_ASN1_SIGNING,
+            &rng,
+        )
+        .unwrap();
+        let key_pair = signature::EcdsaKeyPair::from_pkcs8(
+            &signature::ECDSA_P256_SHA256_ASN1_SIGNING,
+            pkcs8_bytes.as_ref(),
+        )
+        .unwrap();
+
+        let public_key = key_pair.public_key().as_ref();
+        db::insert_report_keypair(&kid, pkcs8_bytes.as_ref(), None).unwrap();
+
+        let connection = db::Connection::default();
+
+        // create secret request
+        let request = RequestDetails {
+            guid: guid.clone(),
+            format: "json".to_string(),
+            secret_type: "report".to_string(),
+            id: kid.clone(),
+        };
+
+        let r = SecretReport { request };
+
+        // test policy
+        assert!(r.policies().is_empty());
+
+        // get report payload
+        let payload = r.payload(connection.clone()).unwrap();
+        let report: Report = serde_json::from_slice(&payload).unwrap();
+
+        // make sure the connection in the report matches
+        let conn: db::Connection = serde_json::from_str(&report.connection).unwrap();
+        assert_eq!(conn.launch_description, connection.launch_description);
+
+        // verify report signature
+        let connection_bytes = report.connection.into_bytes();
+        let signature_bytes = base64::decode(report.signature).unwrap();
+
+        let key = signature::UnparsedPublicKey::new(&signature::ECDSA_P256_SHA256_ASN1, public_key);
+
+        key.verify(&connection_bytes, &signature_bytes).unwrap();
+
+        db::delete_report_keypair(&kid).unwrap();
+    }
+
+    #[test]
     fn test_request_parsing() {
         let secret_id = Uuid::new_v4().as_hyphenated().to_string();
         let guid = "2cf13667-ea72-4013-9dd6-155e89c5a28f".to_string();
+        let connection = db::Connection::default();
         let request = RequestDetails {
             guid: guid.clone(),
             format: "binary".to_string(),
@@ -297,7 +424,7 @@ mod tests {
         assert_eq!(policies.len(), 1);
         assert_eq!(policies[0], expected_policy);
 
-        let payload = secret_request.payload().unwrap();
+        let payload = secret_request.payload(&connection).unwrap();
 
         #[repr(C)]
         #[derive(Serialize)]

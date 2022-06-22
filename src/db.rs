@@ -8,13 +8,14 @@ use crate::request;
 
 use anyhow::*;
 use mysql::{OptsBuilder, Pool, PooledConn, TxOpts};
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::result::Result::Ok;
 use uuid::Uuid;
 
 use mysql::prelude::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Connection {
     pub policy: u32,
     pub fw_api_major: u32,
@@ -300,6 +301,60 @@ pub fn delete_secret(secret_id: &str) -> Result<()> {
     trnsx.exec_drop(mqstr, (secret_id,))?;
     trnsx.commit()?;
     Ok(())
+}
+
+pub fn insert_report_keypair(id: &str, keypair: &[u8], policy_id: Option<u64>) -> Result<()> {
+    let mut dbconn = get_dbconn()?;
+    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
+
+    let keypair_b64 = base64::encode(&keypair);
+    let mqstr = "INSERT INTO report_keypair (key_id, keypair, polid) VALUES(?, ?, ?)";
+
+    trnsx.exec_drop(mqstr, (&id, &keypair_b64, &policy_id))?;
+    trnsx.commit()?;
+
+    Ok(())
+}
+
+pub fn get_report_keypair(id: &str) -> Result<Vec<u8>> {
+    let mut dbconn = get_dbconn()?;
+
+    let mqstr = "SELECT keypair FROM report_keypair WHERE key_id = ?";
+
+    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
+    let keys: Option<String> = trnsx.exec_first(mqstr, (id,))?;
+    let kp = keys.ok_or_else(|| anyhow!("report signing key not found"))?;
+
+    let kp_bytes = base64::decode(&kp)?;
+
+    Ok(kp_bytes)
+}
+
+pub fn delete_report_keypair(key_id: &str) -> Result<()> {
+    let mut dbconn = get_dbconn()?;
+
+    let mqstr = "DELETE FROM report_keypair WHERE key_id = ?";
+
+    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
+
+    trnsx.exec_drop(mqstr, (key_id,))?;
+    trnsx.commit()?;
+    Ok(())
+}
+
+pub fn get_signing_keys_policy(key_id: &str) -> Result<Option<policy::Policy>> {
+    let mut dbconn = get_dbconn()?;
+    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
+
+    let mqstr = "SELECT polid FROM report_keypair WHERE key_id = ? AND polid IS NOT NULL";
+
+    let policy_id: Option<u64> = trnsx.exec_first(mqstr, (key_id,))?;
+
+    if let Some(id) = policy_id {
+        Ok(Some(get_policy(id)?))
+    } else {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
