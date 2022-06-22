@@ -108,6 +108,29 @@ CREATE TABLE `secrets` (
 -- Dumping data for table `secrets`
 --
 
+--
+-- Table structure for table `report_keys`
+--
+
+DROP TABLE IF EXISTS `report_keys`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `report_keypair` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `key_id` varchar(1024) DEFAULT NULL,
+  `keypair` varchar(1024) DEFAULT NULL,
+  `polid` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `key_id` (`key_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `report_keys`
+--
+
+
+
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
 /*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
 /*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;

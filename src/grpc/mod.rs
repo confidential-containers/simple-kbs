@@ -105,12 +105,12 @@ impl KeyBrokerService for KeyBroker {
         })?;
 
         // verify launch measurement
-        let session_verified = verify_measurement(connection, r.launch_measurement, session)
+        let session_verified = verify_measurement(&connection, r.launch_measurement, session)
             .map_err(|e| Status::internal(format!("Measurement Verification Failed: {}", e)))?;
 
         // get secret(s)
         let secret_payload = &secret_request
-            .payload()
+            .payload(&connection)
             .map_err(|e| Status::internal(format!("Cannot fulfill secret request: {}", e)))?;
 
         let (secret_header, secret_data) = package_secret(session_verified, secret_payload)
