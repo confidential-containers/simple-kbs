@@ -11,6 +11,8 @@ import hashlib
 import sys
 from uuid import UUID
 from bs4 import BeautifulSoup as bs
+from sevsnpmeasure import guest
+from sevsnpmeasure.sev_mode import SevMode
 
 from keybroker_pb2_grpc import KeyBrokerServiceStub
 from keybroker_pb2 import BundleRequest, SecretRequest, RequestDetails
@@ -107,74 +109,13 @@ def main():
 
     hv.close()
 
-# calculate the expected launch digest 
-# this will be verified via he measurement
-# so it's fine for the CSP to calculate 
+# calculate the expected launch digest
+# this will be verified via the measurement
+# so it's fine for the CSP to calculate
 # this here
 def get_expected_digest(ovmf, initrd, kernel, cmdline):
-
-    fh = open(initrd, 'rb')
-    h = hashlib.sha256(fh.read())
-    initrd_hash = h.digest()
-
-    fh = open(kernel, 'rb')
-    h = hashlib.sha256(fh.read())
-    kernel_hash = h.digest()
-
-    cmdline = bytearray(cmdline, encoding='utf8')
-
-    # remove trailing `\n` if present
-    cl = len(cmdline)
-    if (cmdline[cl-1] == 0xa):
-        cl -= 1
-
-    # add trailing '\0'
-    cmdline[cl:cl+1] = (0).to_bytes(1, byteorder='little')
-    h = hashlib.sha256(cmdline)
-    cmdline_hash = h.digest()
-
-    h = hashlib.sha256();
-    fh = open(ovmf, 'rb');
-    h.update(fh.read());
-    hashes = bytearray()
-    hashes[0:16]= UUID('{9438d606-4f22-4cc9-b479-a793d411fd21}').bytes_le
-    l = 16 + 2                   # GUID + 2 byte length
-    hashes[16:18] = l.to_bytes(2, byteorder='little')
-
-    hashes[l:l+16] = UUID('{97d02dd8-bd20-4c94-aa78-e7714d36ab2a}').bytes_le
-    l += 16
-    hashes[l:l+2] = (16 + 2 + 32).to_bytes(2, byteorder='little')
-    l += 2
-    hashes[l:l+32] = cmdline_hash
-    l += 32
-
-    hashes[l:l+16] = UUID('{44baf731-3a2f-4bd7-9af1-41e29169781d}').bytes_le
-    l += 16
-    hashes[l:l+2] = (16 + 2 + 32).to_bytes(2, byteorder='little')
-    l += 2
-    hashes[l:l+32] = initrd_hash
-    l += 32
-
-    hashes[l:l+16] = UUID('{4de79437-abd2-427f-b835-d5b172d2045b}').bytes_le
-    l += 16
-    hashes[l:l+2] = (16 + 2 + 32).to_bytes(2, byteorder='little')
-    l += 2
-    hashes[l:l+32] = kernel_hash
-    l += 32
-
-    hashes[16:18] = l.to_bytes(2, byteorder='little')
-
-    # pad up to multiple of 16
-    pl = 15 - ((l + 15) & 15)
-
-    if (pl):
-        hashes[l:l+pl] = (0).to_bytes(pl, byteorder='little')
-        l += pl
-
-    h.update(hashes)
-
-    return base64.b64encode(h.digest()).decode("utf-8")
-
+    ld = guest.calc_launch_digest(SevMode.SEV, 1, None, ovmf, kernel, initrd, cmdline)
+    return base64.b64encode(ld).decode("utf-8")
 
 
 if __name__ == "__main__":
