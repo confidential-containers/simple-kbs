@@ -109,10 +109,10 @@ CREATE TABLE `secrets` (
 --
 
 --
--- Table structure for table `report_keys`
+-- Table structure for table `report_keypair`
 --
 
-DROP TABLE IF EXISTS `report_keys`;
+DROP TABLE IF EXISTS `report_keypair`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `report_keypair` (
@@ -126,7 +126,7 @@ CREATE TABLE `report_keypair` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Dumping data for table `report_keys`
+-- Dumping data for table `report_keypair`
 --
 
 
