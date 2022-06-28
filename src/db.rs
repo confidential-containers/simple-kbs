@@ -180,7 +180,7 @@ pub fn get_secret_policy(secret_id: &str) -> Result<Option<policy::Policy>> {
     }
 }
 
-pub fn insert_keyset(ksetid: &str, kskeys: &[String], polid: u32) -> Result<()> {
+pub fn insert_keyset(ksetid: &str, kskeys: &[String], polid: Option<u32>) -> Result<()> {
     let mut dbconn = get_dbconn()?;
     let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
 
@@ -192,22 +192,6 @@ pub fn insert_keyset(ksetid: &str, kskeys: &[String], polid: u32) -> Result<()> 
     let kskeys_str = serde_json::to_string(kskeys)?;
 
     trnsx.exec_drop(mysqlstr, (ksetid, &kskeys_str, polid))?;
-    trnsx.commit()?;
-    Ok(())
-}
-
-pub fn insert_keyset_only(ksetid: &str, kskeys: &[String]) -> Result<()> {
-    let mut dbconn = get_dbconn()?;
-    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
-
-    let mysqlstr = "INSERT INTO keysets (keysetid, kskeys)
-                    VALUES(?, ?)"
-        .to_string();
-
-    // Create JSON for vector struct member variables
-    let kskeys_str = serde_json::to_string(kskeys)?;
-
-    trnsx.exec_drop(mysqlstr, (ksetid, &kskeys_str))?;
     trnsx.commit()?;
     Ok(())
 }
@@ -267,7 +251,7 @@ pub fn get_secret(secret_id: &str) -> Result<request::Key> {
     })
 }
 
-pub fn insert_secret(secret_id: &str, secret: &str, policy_id: u64) -> Result<()> {
+pub fn insert_secret(secret_id: &str, secret: &str, policy_id: Option<u64>) -> Result<()> {
     let mut dbconn = get_dbconn()?;
 
     let mqstr = "INSERT INTO secrets (secret_id, secret, polid ) VALUES(?, ?, ?)";
@@ -275,18 +259,6 @@ pub fn insert_secret(secret_id: &str, secret: &str, policy_id: u64) -> Result<()
     let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
 
     trnsx.exec_drop(mqstr, (&secret_id, &secret, &policy_id))?;
-    trnsx.commit()?;
-    Ok(())
-}
-
-pub fn insert_secret_only(secret_id: &str, secret: &str) -> Result<()> {
-    let mut dbconn = get_dbconn()?;
-
-    let mqstr = "INSERT INTO secrets (secret_id, secret) VALUES(?, ?)";
-
-    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
-
-    trnsx.exec_drop(mqstr, (&secret_id, &secret))?;
     trnsx.commit()?;
     Ok(())
 }
@@ -440,7 +412,7 @@ mod tests {
         let secid_uuid = Uuid::new_v4().as_hyphenated().to_string();
         let sec_uuid = Uuid::new_v4().as_hyphenated().to_string();
 
-        insert_secret(&secid_uuid, &sec_uuid, tpid)?;
+        insert_secret(&secid_uuid, &sec_uuid, Some(tpid))?;
 
         let testpol = get_secret_policy(&secid_uuid)?
             .ok_or(anyhow!("db::test_secret_policy- no policy returned"))?;
@@ -462,7 +434,7 @@ mod tests {
         let secid = Uuid::new_v4().as_hyphenated().to_string();
         let sec = Uuid::new_v4().as_hyphenated().to_string();
         let polid = 0;
-        insert_secret(&secid, &sec, polid)?;
+        insert_secret(&secid, &sec, Some(polid))?;
 
         let tkey = get_secret(&secid)?;
 
@@ -496,7 +468,7 @@ mod tests {
 
         let ksetid = Uuid::new_v4().as_hyphenated().to_string();
         let polid = 1;
-        insert_keyset(&ksetid, &keys, polid)?;
+        insert_keyset(&ksetid, &keys, Some(polid))?;
         let keyset_ids = get_keyset_ids(&ksetid)?;
         assert_eq!(keyset_ids.len(), keys.len());
         assert_eq!(keyset_ids, keys);

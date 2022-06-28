@@ -295,7 +295,7 @@ mod tests {
 
         let secret_bytes = base64::decode(&secret_value).unwrap();
 
-        db::insert_secret_only(&secret_id, &secret_value).unwrap();
+        db::insert_secret(&secret_id, &secret_value, None).unwrap();
 
         let secret_key = SecretKey { request };
         assert!(secret_key.policies().is_empty());
@@ -321,8 +321,8 @@ mod tests {
         let secret = "test secret";
         let secret_value = base64::encode(secret);
 
-        db::insert_secret_only(&secret_id, &secret_value).unwrap();
-        db::insert_keyset_only(&bundle_id, &[secret_id.clone()]).unwrap();
+        db::insert_secret(&secret_id, &secret_value, None).unwrap();
+        db::insert_keyset(&bundle_id, &[secret_id.clone()], None).unwrap();
 
         let secret_bundle = SecretBundle { request };
         assert!(secret_bundle.policies().is_empty());
@@ -413,7 +413,7 @@ mod tests {
         // this length is hardcoded in the struct below
         assert_eq!(secret_bytes.len(), 11);
 
-        db::insert_secret_only(&secret_id, &secret_value).unwrap();
+        db::insert_secret(&secret_id, &secret_value, None).unwrap();
 
         let requests = vec![request];
         let mut secret_request = SecretRequest::new();
