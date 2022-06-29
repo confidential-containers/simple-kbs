@@ -7,6 +7,7 @@ use crate::policy;
 use crate::request;
 
 use anyhow::*;
+use rand::Rng;
 use std::env;
 use std::result::Result::Ok;
 use uuid::Uuid;
@@ -16,6 +17,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::any::{AnyKind, AnyPoolOptions};
 use sqlx::AnyPool;
 use sqlx::Row;
+
+const CONNECTION_KEY_LENGTH: usize = 32;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Connection {
@@ -84,17 +87,20 @@ fn replace_binds(kind: AnyKind, sql: &str) -> String {
     result.to_string()
 }
 
-pub async fn insert_connection(connection: Connection) -> Result<Uuid> {
+pub async fn insert_connection(connection: Connection) -> Result<(Uuid, String)> {
     let nwuuid = Uuid::new_v4();
     let uuidstr = nwuuid.as_hyphenated().to_string();
+
+    let key_bytes = rand::thread_rng().gen::<[u8; CONNECTION_KEY_LENGTH]>();
+    let key_b64 = base64::encode(key_bytes);
 
     let dbpool = get_dbpool().await?;
 
     let db_type = env::var("KBS_DB_TYPE").expect("KBS_DB_TYPE not set");
     let query_str = if db_type == "sqlite" {
-        "INSERT INTO conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, create_date) VALUES (?, ?, ?, ?, ?, ?, ?, DATE('now'))"
+        "INSERT INTO conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, symkey, create_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE('now'))"
     } else {
-        "INSERT INTO conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, create_date) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())"
+        "INSERT INTO conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, symkey, create_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())"
     };
 
     let new_query_str = replace_binds(dbpool.any_kind(), query_str);
@@ -107,31 +113,35 @@ pub async fn insert_connection(connection: Connection) -> Result<Uuid> {
         .bind(connection.fw_build_id as i64)
         .bind(&connection.launch_description)
         .bind(&connection.fw_digest)
+        .bind(key_b64.clone())
         .execute(&dbpool)
         .await?;
-    Ok(nwuuid)
+    Ok((nwuuid, key_b64))
 }
 
-pub async fn get_connection(uuid: Uuid) -> Result<Connection> {
+pub async fn get_connection(uuid: Uuid) -> Result<(Connection, String)> {
     let uuidstr = uuid.as_hyphenated().to_string();
 
     let dbpool = get_dbpool().await?;
 
-    let query_str = "SELECT policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest FROM conn_bundle WHERE id = ?";
+    let query_str = "SELECT policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, symkey FROM conn_bundle WHERE id = ?";
     let new_query_str = replace_binds(dbpool.any_kind(), query_str);
 
     let con_row = sqlx::query(&new_query_str)
         .bind(uuidstr)
         .fetch_one(&dbpool)
         .await?;
-    Ok(Connection {
+
+    let connection = Connection {
         policy: con_row.try_get::<i32, _>(0)? as u32,
         fw_api_major: con_row.try_get::<i32, _>(1)? as u32,
         fw_api_minor: con_row.try_get::<i32, _>(2)? as u32,
         fw_build_id: con_row.try_get::<i32, _>(3)? as u32,
         launch_description: con_row.try_get::<String, _>(4)?,
         fw_digest: con_row.try_get::<String, _>(5)?,
-    })
+    };
+
+    Ok((connection, con_row.try_get::<String, _>(6)?))
 }
 
 pub async fn delete_connection(uuid: Uuid) -> Result<Uuid> {
@@ -427,10 +437,11 @@ mod tests {
     async fn test_connection() -> anyhow::Result<()> {
         let testconn = Connection::default();
 
-        let tid = insert_connection(testconn.clone()).await?;
+        let (tid, key) = insert_connection(testconn.clone()).await?;
 
-        let resconn = get_connection(tid.clone()).await?;
+        let (resconn, reskey) = get_connection(tid.clone()).await?;
 
+        assert_eq!(key, reskey);
         assert_eq!(testconn.policy, resconn.policy);
         assert_eq!(testconn.fw_api_major, resconn.fw_api_major);
         assert_eq!(testconn.fw_api_minor, resconn.fw_api_minor);

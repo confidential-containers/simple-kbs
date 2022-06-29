@@ -31,6 +31,7 @@ CREATE TABLE conn_bundle (
   fw_build_id INT DEFAULT NULL,
   launch_description varchar(512) DEFAULT NULL,
   fw_digest varchar(512) DEFAULT NULL,
+  symkey varchar(512) DEFAULT NULL,
   create_date TIMESTAMP DEFAULT NULL,
   delete_date TIMESTAMP DEFAULT NULL,
   PRIMARY KEY (id)
