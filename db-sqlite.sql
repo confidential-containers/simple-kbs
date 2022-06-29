@@ -9,6 +9,7 @@ CREATE TABLE `conn_bundle` (
   `fw_build_id` int(11) DEFAULT NULL,
   `launch_description` varchar(512) DEFAULT NULL,
   `fw_digest` varchar(512) DEFAULT NULL,
+  `symkey` varchar(512) DEFAULT NULL,
   `create_date` datetime DEFAULT NULL,
   `delete_date` datetime DEFAULT NULL,
   PRIMARY KEY (`id`)

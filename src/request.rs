@@ -42,6 +42,7 @@ impl SecretRequest {
                 "bundle" => Box::new(SecretBundle { request: r.clone() }),
                 "key" => Box::new(SecretKey { request: r.clone() }),
                 "report" => Box::new(SecretReport { request: r.clone() }),
+                "connection" => Box::new(SecretConnection { request: r.clone() }),
                 _ => return Err(anyhow!("Unknown Secret Type")),
             };
 
@@ -257,6 +258,38 @@ impl SecretType for SecretReport {
                 vec![]
             }
         }
+    }
+
+    fn guid(&self) -> &String {
+        &self.request.guid
+    }
+}
+
+struct SecretConnection {
+    request: RequestDetails,
+}
+
+#[derive(Serialize)]
+struct ConnectionOutput {
+    connection_id: Uuid,
+    key: String,
+}
+
+#[async_trait]
+impl SecretType for SecretConnection {
+    async fn payload(&self, connection: db::Connection) -> Result<Vec<u8>> {
+        let (connection_id, key) = db::insert_connection(connection).await?;
+        let output = ConnectionOutput { connection_id, key };
+
+        Ok(bincode::serialize(&output)?)
+    }
+
+    // Secrets requested later using this connection will
+    // have their policies validated against the initial
+    // parameters of the connection. Only the default policy
+    // must be met to get a connection.
+    async fn policies(&self) -> Vec<policy::Policy> {
+        vec![]
     }
 
     fn guid(&self) -> &String {
