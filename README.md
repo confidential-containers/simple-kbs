@@ -66,6 +66,7 @@ KBS is connected to database via environment variables.
 * `KBS_DB_USER`
 * `KBS_DB_PW`
 * `KBS_DB`
+* `KBS_DB_TYPE`
 
 This KBS does not calculate the launch digest. The guest owner must calculate the launch digest ahead of time.
 The [sev-snp-measure](https://github.com/IBM/sev-snp-measure) tool can be used to calculate the launch digest of an SEV guest. For example:
