@@ -127,7 +127,7 @@ impl KeyBrokerService for KeyBroker {
 
 pub async fn start_service(socket: SocketAddr) -> Result<()> {
     let service = KeyBroker::default();
-    let _server = Server::builder()
+    Server::builder()
         .add_service(KeyBrokerServiceServer::new(service))
         .serve(socket)
         .await?;
