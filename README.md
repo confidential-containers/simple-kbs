@@ -32,6 +32,18 @@ The secrets are provided in the OVMF secret table format.
 
 Additional secret types may be supported in the future.
 
+### GetOnlineSecret
+
+This endpoint can be used to request secrets at runtime.
+To request online secrets the client should first request a `connection` secret at boot.
+The connection secret includes a symmetric encryption key and a connection id.
+Like any other boot secret, these values are wrapped in a secret blob, which is encrypted and integrity-protected.
+A client inside the guest can extract the connection secret and use it to request further secrets at runtime using the `GetOnlineSecret` endpoint.
+To request an online secret, the client provides their id and a list of secret request.
+This list is the same as what might be used in a `GetSecret` request.
+All the secret types that are available at boot can also be requested at runtime.
+The policy for online secrets will be evaluated against the guest's original launch information.
+
 
 ## Policies and Secrets 
 

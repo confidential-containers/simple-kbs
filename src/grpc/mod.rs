@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 extern crate lazy_static;
 
+use crate::crypto;
 use crate::db;
 use crate::request;
 use crate::sev_tools::{generate_launch_bundle, package_secret, verify_measurement};
@@ -21,7 +22,10 @@ use crate::sev_tools::{generate_launch_bundle, package_secret, verify_measuremen
 use sev::session::{Initialized, Session};
 
 use key_broker::key_broker_service_server::{KeyBrokerService, KeyBrokerServiceServer};
-use key_broker::{BundleRequest, BundleResponse, SecretRequest, SecretResponse};
+use key_broker::{
+    BundleRequest, BundleResponse, OnlineSecretRequest, OnlineSecretResponse, SecretRequest,
+    SecretResponse,
+};
 
 // Keep the session for each connection in memory.
 lazy_static::lazy_static! {
@@ -110,7 +114,7 @@ impl KeyBrokerService for KeyBroker {
 
         // get secret(s)
         let secret_payload = &secret_request
-            .payload(&connection)
+            .payload_table(&connection)
             .await
             .map_err(|e| Status::internal(format!("Cannot fulfill secret request: {}", e)))?;
 
@@ -122,6 +126,50 @@ impl KeyBrokerService for KeyBroker {
             launch_secret_data: secret_data,
         };
         Result::Ok(Response::new(reply))
+    }
+
+    async fn get_online_secret(
+        &self,
+        request: Request<OnlineSecretRequest>,
+    ) -> Result<Response<OnlineSecretResponse>, Status> {
+        let r = request.into_inner();
+        let client_id = Uuid::parse_str(&r.client_id)
+            .map_err(|e| Status::internal(format!("Malformed Client ID: {}", e)))?;
+
+        let (connection, key) = db::get_connection(client_id)
+            .await
+            .map_err(|e| Status::internal(format!("Connection not found: {}", e)))?;
+
+        let mut secret_request = request::SecretRequest::new();
+
+        secret_request
+            .parse_requests(&r.secret_requests)
+            .map_err(|e| Status::internal(format!("Bad secret request: {}", e)))?;
+
+        let policies = secret_request.policies().await;
+
+        // Validate connection against policies
+        for p in policies {
+            p.verify(&connection)
+                .map_err(|e| Status::internal(format!("Policy validation failed: {}", e)))?;
+        }
+        info!(
+            "Policy validated succesfully. Connection: {:?}",
+            &connection
+        );
+
+        let secret_payload = &secret_request
+            .payload_simple(&connection)
+            .await
+            .map_err(|e| Status::internal(format!("Cannot fulfill secret request: {}", e)))?;
+
+        // encrypt secret payload
+        let (payload, iv) = crypto::encrypt_secret_payload(secret_payload, key)
+            .map_err(|e| Status::internal(format!("Failed to encrypt secret: {}", e)))?;
+
+        let response = OnlineSecretResponse { payload, iv };
+
+        Result::Ok(Response::new(response))
     }
 }
 
