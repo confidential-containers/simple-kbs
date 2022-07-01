@@ -7,11 +7,6 @@ use crate::policy;
 use crate::request;
 
 use anyhow::*;
-<<<<<<< HEAD
-use mysql::{OptsBuilder, Pool, PooledConn, TxOpts};
-use serde::{Deserialize, Serialize};
-=======
->>>>>>> 4e8c96a (First commits to convert database handling to sqlx.)
 use std::env;
 use std::result::Result::Ok;
 use uuid::Uuid;
@@ -122,7 +117,6 @@ pub async fn insert_policy(policy: &policy::Policy) -> Result<u64> {
     //let allowed_policy_json = serde_json::to_string(&policy.allowed_policies)?;
     //let allowed_build_ids_json = serde_json::to_string(&policy.allowed_build_ids)?;
 
-    let mut dbconn = get_dbconn()?;
     let query = format!(
         "INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(\'{:?}\', \'{:?}\', {}, {}, \'{:?}\', NOW(), 1)",
         policy.allowed_digests,
@@ -285,63 +279,6 @@ pub async fn delete_secret(secret_id: &str) -> Result<()> {
     let query = format!("DELETE from secrets WHERE secret_id = \'{}\'", secret_id);
 
     sqlx::query(query.as_str()).execute(&dbpool).await?;
-
-    Ok(())
-}
-
-pub fn insert_report_keypair(id: &str, keypair: &[u8], policy_id: Option<u64>) -> Result<()> {
-    let mut dbconn = get_dbconn()?;
-    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
-
-    let keypair_b64 = base64::encode(&keypair);
-    let mqstr = "INSERT INTO report_keypair (key_id, keypair, polid) VALUES(?, ?, ?)";
-
-    trnsx.exec_drop(mqstr, (&id, &keypair_b64, &policy_id))?;
-    trnsx.commit()?;
-
-    Ok(())
-}
-
-pub fn get_report_keypair(id: &str) -> Result<Vec<u8>> {
-    let mut dbconn = get_dbconn()?;
-
-    let mqstr = "SELECT keypair FROM report_keypair WHERE key_id = ?";
-
-    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
-    let keys: Option<String> = trnsx.exec_first(mqstr, (id,))?;
-    let kp = keys.ok_or_else(|| anyhow!("report signing key not found"))?;
-
-    let kp_bytes = base64::decode(&kp)?;
-
-    Ok(kp_bytes)
-}
-
-pub fn delete_report_keypair(key_id: &str) -> Result<()> {
-    let mut dbconn = get_dbconn()?;
-
-    let mqstr = "DELETE FROM report_keypair WHERE key_id = ?";
-
-    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
-
-    trnsx.exec_drop(mqstr, (key_id,))?;
-    trnsx.commit()?;
-    Ok(())
-}
-
-pub fn get_signing_keys_policy(key_id: &str) -> Result<Option<policy::Policy>> {
-    let mut dbconn = get_dbconn()?;
-    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
-
-    let mqstr = "SELECT polid FROM report_keypair WHERE key_id = ? AND polid IS NOT NULL";
-
-    let policy_id: Option<u64> = trnsx.exec_first(mqstr, (key_id,))?;
-
-    if let Some(id) = policy_id {
-        Ok(Some(get_policy(id)?))
-    } else {
-        Ok(None)
-    }
-}
 
     Ok(())
 }
