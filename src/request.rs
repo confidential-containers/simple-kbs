@@ -299,9 +299,9 @@ mod tests {
         let secret_key = SecretKey { request };
         assert!(aw!(secret_key.policies()).is_empty());
         assert_eq!(secret_key.guid(), &guid);
-        assert_eq!(secret_bytes, secret_key.payload(connection).unwrap());
+        assert_eq!(secret_bytes, aw!(secret_key.payload(connection)).unwrap());
 
-        db::delete_secret(&secret_id).unwrap();
+        aw!(db::delete_secret(&secret_id)).unwrap();
     }
 
     #[test]
@@ -392,61 +392,6 @@ mod tests {
         key.verify(&connection_bytes, &signature_bytes).unwrap();
 
         aw!(db::delete_report_keypair(&kid)).unwrap();
-    }
-
-    #[test]
-    fn test_report() {
-        // setup test state
-        let guid = "2cf13667-ea72-4013-9dd6-155e89c5a28f".to_string();
-        let kid = "test-keypair".to_string();
-
-        let rng = SystemRandom::new();
-        let pkcs8_bytes = signature::EcdsaKeyPair::generate_pkcs8(
-            &signature::ECDSA_P256_SHA256_ASN1_SIGNING,
-            &rng,
-        )
-        .unwrap();
-        let key_pair = signature::EcdsaKeyPair::from_pkcs8(
-            &signature::ECDSA_P256_SHA256_ASN1_SIGNING,
-            pkcs8_bytes.as_ref(),
-        )
-        .unwrap();
-
-        let public_key = key_pair.public_key().as_ref();
-        db::insert_report_keypair(&kid, pkcs8_bytes.as_ref(), None).unwrap();
-
-        let connection = db::Connection::default();
-
-        // create secret request
-        let request = RequestDetails {
-            guid: guid.clone(),
-            format: "json".to_string(),
-            secret_type: "report".to_string(),
-            id: kid.clone(),
-        };
-
-        let r = SecretReport { request };
-
-        // test policy
-        assert!(r.policies().is_empty());
-
-        // get report payload
-        let payload = r.payload(connection.clone()).unwrap();
-        let report: Report = serde_json::from_slice(&payload).unwrap();
-
-        // make sure the connection in the report matches
-        let conn: db::Connection = serde_json::from_str(&report.connection).unwrap();
-        assert_eq!(conn.launch_description, connection.launch_description);
-
-        // verify report signature
-        let connection_bytes = report.connection.into_bytes();
-        let signature_bytes = base64::decode(report.signature).unwrap();
-
-        let key = signature::UnparsedPublicKey::new(&signature::ECDSA_P256_SHA256_ASN1, public_key);
-
-        key.verify(&connection_bytes, &signature_bytes).unwrap();
-
-        db::delete_report_keypair(&kid).unwrap();
     }
 
     #[test]
