@@ -1,4 +1,5 @@
 // Copyright (c) 2022 IBM
+
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -61,7 +62,7 @@ impl SecretRequest {
         policies
     }
 
-    pub async fn payload(&self, connection: &db::Connection) -> Result<Vec<u8>> {
+    pub async fn payload_table(&self, connection: &db::Connection) -> Result<Vec<u8>> {
         let mut payload = vec![];
 
         for s in &self.secrets {
@@ -88,6 +89,14 @@ impl SecretRequest {
         secret_table.extend_from_slice(&vec![0u8; padded_length - secret_table.len()]);
 
         Ok(secret_table)
+    }
+
+    pub async fn payload_simple(&self, connection: &db::Connection) -> Result<Vec<u8>> {
+        let mut payload = HashMap::new();
+        for s in &self.secrets {
+            payload.insert(s.guid(), s.payload(connection.clone()).await?);
+        }
+        Ok(bincode::serialize(&payload)?)
     }
 }
 
@@ -271,17 +280,17 @@ struct SecretConnection {
 
 #[derive(Serialize)]
 struct ConnectionOutput {
-    connection_id: Uuid,
+    client_id: Uuid,
     key: String,
 }
 
 #[async_trait]
 impl SecretType for SecretConnection {
     async fn payload(&self, connection: db::Connection) -> Result<Vec<u8>> {
-        let (connection_id, key) = db::insert_connection(connection).await?;
-        let output = ConnectionOutput { connection_id, key };
+        let (client_id, key) = db::insert_connection(connection).await?;
+        let output = ConnectionOutput { client_id, key };
 
-        Ok(bincode::serialize(&output)?)
+        Ok(serde_json::to_vec(&output)?)
     }
 
     // Secrets requested later using this connection will
@@ -337,7 +346,7 @@ mod tests {
     async fn test_secret_bundle() {
         let secret_id = Uuid::new_v4().as_hyphenated().to_string();
         let bundle_id = Uuid::new_v4().as_hyphenated().to_string();
-        let guid = "2cf13667-ea72-4013-9dd6-155e89c5a28f".to_string();
+        let guid = "1ee27366-0c87-43a6-af48-28543eaf7cb0".to_string();
         let connection = db::Connection::default();
         let request = RequestDetails {
             guid: guid.clone(),
@@ -460,7 +469,7 @@ mod tests {
         assert_eq!(policies.len(), 1);
         assert_eq!(policies[0], expected_policy);
 
-        let payload = secret_request.payload(&connection).await.unwrap();
+        let payload = secret_request.payload_table(&connection).await.unwrap();
 
         #[repr(C)]
         #[derive(Serialize)]

@@ -27,6 +27,7 @@ hex = "0.4.3"
 sqlx = { version="0.5", features = [ "runtime-tokio-rustls", "postgres", "mysql", "sqlite", "any" ] }
 async-trait = "0.1.56"
 regex = "1"
+aes-gcm = "0.9.4"
 
 [dev-dependencies]
 tokio-test = "0.4.2"

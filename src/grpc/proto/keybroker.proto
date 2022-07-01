@@ -55,7 +55,18 @@ message SecretResponse {
     string LaunchSecretData = 2;
 }
 
+message OnlineSecretRequest {
+    string ClientId = 1;
+    repeated RequestDetails SecretRequests = 2;
+}
+
+message OnlineSecretResponse {
+    string Payload = 1;
+    string IV = 2;
+}
+
 service KeyBrokerService {
     rpc GetBundle(BundleRequest) returns (BundleResponse) {};
     rpc GetSecret(SecretRequest) returns (SecretResponse) {};
+    rpc GetOnlineSecret(OnlineSecretRequest) returns (OnlineSecretResponse) {};
 }
