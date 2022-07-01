@@ -61,6 +61,7 @@ jobs:
       KBS_DB_USER: root
       KBS_DB_PW: root
       KBS_DB: simple_kbs
+      KBS_DB_TYPE: mysql
     steps:
       - name: Checkout
         uses: actions/checkout@v2
