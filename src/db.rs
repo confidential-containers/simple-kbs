@@ -62,11 +62,6 @@ pub async fn get_dbpool() -> Result<AnyPool> {
         .await
         .map_err(|e| anyhow!("Encountered error trying to create a mysql pool: {}", e))?;
     Ok(db_pool)
-    //    Ok(AnyPoolOptions::new()
-    //        .max_connections(1000)
-    //        .connect(&db_url)
-    //        .await
-    //        .map_err(|e| anyhow!("Encountered error trying to create a mysql pool: {}", e))?)
 }
 
 pub async fn insert_connection(connection: Connection) -> Result<Uuid> {
@@ -74,32 +69,6 @@ pub async fn insert_connection(connection: Connection) -> Result<Uuid> {
 
     let nwuuid = Uuid::new_v4();
     let uuidstr = nwuuid.as_hyphenated().to_string();
-<<<<<<< HEAD
-
-    let mqstr = "INSERT INTO conn_bundle (id, policy, fw_api_major, fw_api_minor,
-                 fw_build_id, launch_description, fw_digest,create_date)
-                 VALUES(?, ?, ?, ?, ?, ?, ?,NOW())"
-        .to_string();
-
-    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
-
-    trnsx.exec_drop(
-        mqstr,
-        (
-            uuidstr,
-            connection.policy,
-            connection.fw_api_major,
-            connection.fw_api_minor,
-            connection.fw_build_id,
-            connection.launch_description,
-            connection.fw_digest,
-        ),
-    )?;
-    trnsx.commit()?;
-    Ok(nwuuid)
-}
-=======
->>>>>>> 4e8c96a (First commits to convert database handling to sqlx.)
 
     let query = format!("insert into conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, create_date) VALUES(\"{}\", {}, {}, {}, {}, \"{}\", \"{}\", NOW())", 
      uuidstr,
@@ -153,55 +122,7 @@ pub async fn insert_policy(policy: &policy::Policy) -> Result<u64> {
     //let allowed_policy_json = serde_json::to_string(&policy.allowed_policies)?;
     //let allowed_build_ids_json = serde_json::to_string(&policy.allowed_build_ids)?;
 
-<<<<<<< HEAD
-    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
-    trnsx.exec_drop(mqstr, (uuid.as_hyphenated().to_string(),))?;
-    trnsx.commit()?;
-    Ok(uuid)
-}
-
-pub fn get_connection(uuid: Uuid) -> Result<Connection> {
     let mut dbconn = get_dbconn()?;
-
-    let uuidstr = uuid.as_hyphenated().to_string();
-    let mqstr = "SELECT policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest FROM conn_bundle WHERE id = ?";
-
-    let conres = dbconn.exec_map(
-        mqstr,
-        (uuidstr,),
-        |(policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest)| {
-            Connection {
-                policy,
-                fw_api_major,
-                fw_api_minor,
-                fw_build_id,
-                launch_description,
-                fw_digest,
-            }
-        },
-    )?;
-
-    Ok(conres[0].clone())
-}
-
-pub fn get_secret_policy(secret_id: &str) -> Result<Option<policy::Policy>> {
-    let mut dbconn = get_dbconn()?;
-    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
-
-    let mqstr = "SELECT polid FROM secrets WHERE polid IS NOT NULL AND secret_id = ?";
-    let policy_id: Option<u64> = trnsx.exec_first(mqstr, (secret_id,))?;
-
-    if let Some(id) = policy_id {
-        Ok(Some(get_policy(id)?))
-    } else {
-        Ok(None)
-    }
-}
-
-pub fn insert_keyset(ksetid: &str, kskeys: &[String], polid: Option<u32>) -> Result<()> {
-    let mut dbconn = get_dbconn()?;
-    let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
-=======
     let query = format!(
         "INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(\'{:?}\', \'{:?}\', {}, {}, \'{:?}\', NOW(), 1)",
         policy.allowed_digests,
@@ -254,7 +175,6 @@ pub async fn delete_policy(pid: &u64) -> Result<()> {
     sqlx::query(query.as_str()).execute(&dbpool).await?;
     Ok(())
 }
->>>>>>> 4e8c96a (First commits to convert database handling to sqlx.)
 
 pub async fn insert_keyset(ksetid: &str, kskeys: &[String], polid: Option<u32>) -> Result<()> {
     let dbpool = get_dbpool().await?;
