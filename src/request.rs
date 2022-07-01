@@ -1,4 +1,5 @@
 // Copyright (c) 2022 IBM
+
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -61,7 +62,7 @@ impl SecretRequest {
         policies
     }
 
-    pub fn payload(&self, connection: &db::Connection) -> Result<Vec<u8>> {
+    pub fn payload_table(&self, connection: &db::Connection) -> Result<Vec<u8>> {
         let mut payload = vec![];
 
         for s in &self.secrets {
@@ -88,6 +89,14 @@ impl SecretRequest {
         secret_table.extend_from_slice(&vec![0u8; padded_length - secret_table.len()]);
 
         Ok(secret_table)
+    }
+
+    pub fn payload_simple(&self, connection: &db::Connection) -> Result<Vec<u8>> {
+        let mut payload = HashMap::new();
+        for s in &self.secrets {
+            payload.insert(s.guid(), s.payload(connection.clone())?);
+        }
+        Ok(bincode::serialize(&payload)?)
     }
 }
 
@@ -278,16 +287,16 @@ struct SecretConnection {
 
 #[derive(Serialize)]
 struct ConnectionOutput {
-    connection_id: Uuid,
+    client_id: Uuid,
     key: String,
 }
 
 impl SecretType for SecretConnection {
     fn payload(&self, connection: db::Connection) -> Result<Vec<u8>> {
-        let (connection_id, key) = db::insert_connection(connection)?;
-        let output = ConnectionOutput { connection_id, key };
+        let (client_id, key) = db::insert_connection(connection)?;
+        let output = ConnectionOutput { client_id, key };
 
-        Ok(bincode::serialize(&output)?)
+        Ok(serde_json::to_vec(&output)?)
     }
 
     // Secrets requested later using this connection will
@@ -456,7 +465,7 @@ mod tests {
         assert_eq!(policies.len(), 1);
         assert_eq!(policies[0], expected_policy);
 
-        let payload = secret_request.payload(&connection).unwrap();
+        let payload = secret_request.payload_table(&connection).unwrap();
 
         #[repr(C)]
         #[derive(Serialize)]
