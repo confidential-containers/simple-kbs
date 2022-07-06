@@ -1,4 +1,5 @@
 // Copyright (c) 2022 IBM
+
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -42,6 +43,7 @@ impl SecretRequest {
                 "bundle" => Box::new(SecretBundle { request: r.clone() }),
                 "key" => Box::new(SecretKey { request: r.clone() }),
                 "report" => Box::new(SecretReport { request: r.clone() }),
+                "connection" => Box::new(SecretConnection { request: r.clone() }),
                 _ => return Err(anyhow!("Unknown Secret Type")),
             };
 
@@ -60,7 +62,7 @@ impl SecretRequest {
         policies
     }
 
-    pub fn payload(&self, connection: &db::Connection) -> Result<Vec<u8>> {
+    pub fn payload_table(&self, connection: &db::Connection) -> Result<Vec<u8>> {
         let mut payload = vec![];
 
         for s in &self.secrets {
@@ -87,6 +89,14 @@ impl SecretRequest {
         secret_table.extend_from_slice(&vec![0u8; padded_length - secret_table.len()]);
 
         Ok(secret_table)
+    }
+
+    pub fn payload_simple(&self, connection: &db::Connection) -> Result<Vec<u8>> {
+        let mut payload = HashMap::new();
+        for s in &self.secrets {
+            payload.insert(s.guid(), s.payload(connection.clone())?);
+        }
+        Ok(bincode::serialize(&payload)?)
     }
 }
 
@@ -271,6 +281,37 @@ impl SecretType for SecretReport {
     }
 }
 
+struct SecretConnection {
+    request: RequestDetails,
+}
+
+#[derive(Serialize)]
+struct ConnectionOutput {
+    client_id: Uuid,
+    key: String,
+}
+
+impl SecretType for SecretConnection {
+    fn payload(&self, connection: db::Connection) -> Result<Vec<u8>> {
+        let (client_id, key) = db::insert_connection(connection)?;
+        let output = ConnectionOutput { client_id, key };
+
+        Ok(serde_json::to_vec(&output)?)
+    }
+
+    // Secrets requested later using this connection will
+    // have their policies validated against the initial
+    // parameters of the connection. Only the default policy
+    // must be met to get a connection.
+    fn policies(&self) -> Vec<policy::Policy> {
+        vec![]
+    }
+
+    fn guid(&self) -> &String {
+        &self.request.guid
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,7 +465,7 @@ mod tests {
         assert_eq!(policies.len(), 1);
         assert_eq!(policies[0], expected_policy);
 
-        let payload = secret_request.payload(&connection).unwrap();
+        let payload = secret_request.payload_table(&connection).unwrap();
 
         #[repr(C)]
         #[derive(Serialize)]

@@ -8,6 +8,7 @@ use clap::{Arg, Command};
 use log::*;
 use std::net::SocketAddr;
 
+pub mod crypto;
 pub mod db;
 pub mod grpc;
 pub mod policy;

@@ -8,12 +8,15 @@ use crate::request;
 
 use anyhow::*;
 use mysql::{OptsBuilder, Pool, PooledConn, TxOpts};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::result::Result::Ok;
 use uuid::Uuid;
 
 use mysql::prelude::*;
+
+const CONNECTION_KEY_LENGTH: usize = 32;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Connection {
@@ -55,15 +58,18 @@ pub fn get_dbconn() -> Result<PooledConn> {
     Ok(dbconn)
 }
 
-pub fn insert_connection(connection: Connection) -> Result<Uuid> {
+pub fn insert_connection(connection: Connection) -> Result<(Uuid, String)> {
     let mut dbconn = get_dbconn()?;
 
     let nwuuid = Uuid::new_v4();
     let uuidstr = nwuuid.as_hyphenated().to_string();
 
+    let key_bytes = rand::thread_rng().gen::<[u8; CONNECTION_KEY_LENGTH]>();
+    let key_b64 = base64::encode(key_bytes);
+
     let mqstr = "INSERT INTO conn_bundle (id, policy, fw_api_major, fw_api_minor,
-                 fw_build_id, launch_description, fw_digest,create_date)
-                 VALUES(?, ?, ?, ?, ?, ?, ?,NOW())"
+                 fw_build_id, launch_description, fw_digest, symkey, create_date)
+                 VALUES(?, ?, ?, ?, ?, ?, ?, ?, NOW())"
         .to_string();
 
     let mut trnsx = dbconn.start_transaction(TxOpts::default())?;
@@ -78,10 +84,11 @@ pub fn insert_connection(connection: Connection) -> Result<Uuid> {
             connection.fw_build_id,
             connection.launch_description,
             connection.fw_digest,
+            key_b64.clone(),
         ),
     )?;
     trnsx.commit()?;
-    Ok(nwuuid)
+    Ok((nwuuid, key_b64))
 }
 
 pub fn insert_policy(policy: &policy::Policy) -> Result<u64> {
@@ -142,28 +149,40 @@ pub fn delete_connection(uuid: Uuid) -> Result<Uuid> {
     Ok(uuid)
 }
 
-pub fn get_connection(uuid: Uuid) -> Result<Connection> {
+pub fn get_connection(uuid: Uuid) -> Result<(Connection, String)> {
     let mut dbconn = get_dbconn()?;
 
     let uuidstr = uuid.as_hyphenated().to_string();
-    let mqstr = "SELECT policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest FROM conn_bundle WHERE id = ?";
+    let mqstr = "SELECT policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, symkey FROM conn_bundle WHERE id = ?";
 
     let conres = dbconn.exec_map(
         mqstr,
         (uuidstr,),
-        |(policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest)| {
-            Connection {
-                policy,
-                fw_api_major,
-                fw_api_minor,
-                fw_build_id,
-                launch_description,
-                fw_digest,
-            }
+        |(
+            policy,
+            fw_api_major,
+            fw_api_minor,
+            fw_build_id,
+            launch_description,
+            fw_digest,
+            key_b64,
+        )|
+         -> (Connection, String) {
+            (
+                Connection {
+                    policy,
+                    fw_api_major,
+                    fw_api_minor,
+                    fw_build_id,
+                    launch_description,
+                    fw_digest,
+                },
+                key_b64,
+            )
         },
     )?;
 
-    Ok(conres[0].clone())
+    Ok((conres[0].0.clone(), conres[0].1.clone()))
 }
 
 pub fn get_secret_policy(secret_id: &str) -> Result<Option<policy::Policy>> {
@@ -337,10 +356,11 @@ mod tests {
     fn test_connection() -> anyhow::Result<()> {
         let testconn = Connection::default();
 
-        let tid = insert_connection(testconn.clone())?;
+        let (tid, key) = insert_connection(testconn.clone())?;
 
-        let resconn = get_connection(tid.clone())?;
+        let (resconn, reskey) = get_connection(tid.clone())?;
 
+        assert_eq!(key, reskey);
         assert_eq!(testconn.policy, resconn.policy);
         assert_eq!(testconn.fw_api_major, resconn.fw_api_major);
         assert_eq!(testconn.fw_api_minor, resconn.fw_api_minor);
