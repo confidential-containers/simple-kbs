@@ -1,9 +1,0 @@
-title = "example kbs-db config file"
-
-[database]
-type = "mysql"
-server = "gensev2.sl.cloud9.ibm.com"
-port = "3306"
-user = "dunnderr"
-pw = "St4r70rdG3t5N0Cr3d!"
-db = "sev_attest" 

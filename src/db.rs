@@ -55,7 +55,7 @@ pub async fn get_dbpool() -> Result<AnyPool> {
         .max_connections(1000)
         .connect(&db_url)
         .await
-        .map_err(|e| anyhow!("Encountered error trying to create a mysql pool: {}", e))?;
+        .map_err(|e| anyhow!("Encountered error trying to create database pool: {}", e))?;
     Ok(db_pool)
 }
 
@@ -113,17 +113,17 @@ pub async fn delete_connection(uuid: Uuid) -> Result<Uuid> {
 pub async fn insert_policy(policy: &policy::Policy) -> Result<u64> {
     let dbpool = get_dbpool().await?;
 
-    //let allowed_digests_json = serde_json::to_string(&policy.allowed_digests)?;
-    //let allowed_policy_json = serde_json::to_string(&policy.allowed_policies)?;
-    //let allowed_build_ids_json = serde_json::to_string(&policy.allowed_build_ids)?;
+    let allowed_digests_json = serde_json::to_string(&policy.allowed_digests)?;
+    let allowed_policies_json = serde_json::to_string(&policy.allowed_policies)?;
+    let allowed_build_ids_json = serde_json::to_string(&policy.allowed_build_ids)?;
 
     let query = format!(
-        "INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(\'{:?}\', \'{:?}\', {}, {}, \'{:?}\', NOW(), 1)",
-        policy.allowed_digests,
-        policy.allowed_policies,
+        "INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(\'{}\', \'{}\', {}, {}, \'{}\', NOW(), 1)",
+        allowed_digests_json,
+        allowed_policies_json,
         policy.min_fw_api_major,
         policy.min_fw_api_minor,
-        policy.allowed_build_ids
+        allowed_build_ids_json
     );
 
     let last_insert_row = sqlx::query(query.as_str())
@@ -131,7 +131,8 @@ pub async fn insert_policy(policy: &policy::Policy) -> Result<u64> {
         .await?
         .last_insert_id();
 
-    let last_insert_id = last_insert_row.unwrap();
+    let last_insert_id = last_insert_row
+        .ok_or_else(|| anyhow!("db::insert_policy - error, unable to get last_insert_row"))?;
 
     Ok(last_insert_id as u64)
 }
@@ -142,11 +143,11 @@ pub async fn get_policy(pid: u64) -> Result<policy::Policy> {
     let query = format!("SELECT allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids FROM policy WHERE id = {} AND valid = 1", pid);
     let row_vec = sqlx::query(query.as_str()).fetch_one(&dbpool).await?;
     Ok(policy::Policy {
-        allowed_digests: serde_json::from_str(&row_vec.try_get::<String, _>(0)?).unwrap(),
-        allowed_policies: serde_json::from_str(&row_vec.try_get::<String, _>(1)?).unwrap(),
+        allowed_digests: serde_json::from_str(&row_vec.try_get::<String, _>(0)?)?,
+        allowed_policies: serde_json::from_str(&row_vec.try_get::<String, _>(1)?)?,
         min_fw_api_major: row_vec.try_get::<i32, _>(2)? as u32,
         min_fw_api_minor: row_vec.try_get::<i32, _>(3)? as u32,
-        allowed_build_ids: serde_json::from_str(&row_vec.try_get::<String, _>(4)?).unwrap(),
+        allowed_build_ids: serde_json::from_str(&row_vec.try_get::<String, _>(4)?)?,
     })
 }
 
@@ -259,7 +260,7 @@ pub async fn insert_secret(secret_id: &str, secret: &str, policy_id: Option<u64>
 
     let query = match policy_id {
         Some(p) => format!(
-            "INSERT INTO secrets (secret_id, secret, polid ) VALUES(\'{}\', \'{}\', {:?})",
+            "INSERT INTO secrets (secret_id, secret, polid ) VALUES(\'{}\', \'{}\', \'{}\')",
             secret_id, secret, p
         ),
         None => format!(
@@ -340,16 +341,23 @@ pub async fn get_signing_keys_policy(key_id: &str) -> Result<Option<policy::Poli
         key_id
     );
 
-    let policy_id_row = sqlx::query(query.as_str()).fetch_one(&dbpool).await?;
+    let policy_id_option = sqlx::query(query.as_str()).fetch_optional(&dbpool).await?;
 
-    let policy_id = policy_id_row.try_get::<i32, _>(0)? as u64;
-    Ok(Some(get_policy(policy_id).await?))
+    match policy_id_option {
+        Some(p) => {
+            let pid = p.try_get::<i32, _>(0)? as u64;
+            Ok(Some(get_policy(pid).await?))
+        }
+        None => Ok(None),
+    }
 }
 
 // -----------------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
+
     use super::*;
+    use ring::{rand::SystemRandom, signature};
 
     macro_rules! aw {
         ($e:expr) => {
@@ -436,11 +444,7 @@ mod tests {
         let secid_uuid = Uuid::new_v4().as_hyphenated().to_string();
         let sec_uuid = Uuid::new_v4().as_hyphenated().to_string();
 
-        aw!(insert_secret(
-            &secid_uuid,
-            &sec_uuid,
-            Option::<u64>::Some(tpid)
-        ))?;
+        aw!(insert_secret(&secid_uuid, &sec_uuid, Option::Some(tpid)))?;
 
         let testpol = aw!(get_secret_policy(&secid_uuid))?;
 
@@ -453,6 +457,8 @@ mod tests {
         assert_eq!(testpol.min_fw_api_minor, 0);
         assert_eq!(testpol.allowed_build_ids[0], 0);
 
+        aw!(delete_secret(&secid_uuid))?;
+        aw!(delete_policy(&tpid))?;
         Ok(())
     }
 
@@ -502,6 +508,74 @@ mod tests {
         assert_eq!(keyset_ids, keys);
 
         aw!(delete_keyset(&ksetid))?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_report_keypair() -> anyhow::Result<()> {
+        let tid = "man-moon-dog-face-in-the-banana-patch".to_string();
+
+        let rng = SystemRandom::new();
+        let pkcs8_bytes = signature::EcdsaKeyPair::generate_pkcs8(
+            &signature::ECDSA_P256_SHA256_ASN1_SIGNING,
+            &rng,
+        )
+        .unwrap();
+
+        aw!(insert_report_keypair(&tid, pkcs8_bytes.as_ref(), None)).unwrap();
+
+        let keypair_vec = aw!(get_report_keypair(&tid)).unwrap();
+        assert_eq!(keypair_vec, pkcs8_bytes.as_ref());
+
+        aw!(delete_report_keypair(&tid))?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_signing_keys_policy() -> anyhow::Result<()> {
+        let testpol = policy::Policy {
+            allowed_digests: vec!["0".to_string(), "1".to_string(), "3".to_string()],
+            allowed_policies: vec![0u32, 1u32, 2u32],
+            min_fw_api_major: 0,
+            min_fw_api_minor: 0,
+            allowed_build_ids: vec![0u32, 1u32, 2u32],
+        };
+
+        let polid = aw!(insert_policy(&testpol))?;
+
+        let mut tid = "man-moon-dog-face-in-the-banana-patch-ksp".to_string();
+
+        let rng = SystemRandom::new();
+        let pkcs8_bytes = signature::EcdsaKeyPair::generate_pkcs8(
+            &signature::ECDSA_P256_SHA256_ASN1_SIGNING,
+            &rng,
+        )
+        .unwrap();
+
+        // First test with valid policy id
+        aw!(insert_report_keypair(
+            &tid,
+            pkcs8_bytes.as_ref(),
+            Option::Some(polid)
+        ))
+        .unwrap();
+
+        let keypair_policy = aw!(get_signing_keys_policy(&tid))?;
+        assert_eq!(keypair_policy, Option::Some(testpol));
+        aw!(delete_report_keypair(&tid))?;
+        aw!(delete_policy(&polid))?;
+
+        // Now test report_keypair without a policy
+
+        tid = "the-quick-brown-cow-jumped-over-the-moon-no-policy".to_string();
+
+        aw!(insert_report_keypair(&tid, pkcs8_bytes.as_ref(), None))?;
+
+        let keypair_policy = aw!(get_signing_keys_policy(&tid))?;
+        assert_eq!(keypair_policy, None);
+        aw!(delete_report_keypair(&tid))?;
 
         Ok(())
     }

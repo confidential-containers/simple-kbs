@@ -413,7 +413,6 @@ mod tests {
         assert_eq!(secret_bytes.len(), 11);
 
         aw!(db::insert_secret(&secret_id, &secret_value, None)).unwrap();
-        //aw!(db::insert_secret_only(&secret_id, &secret_value)).unwrap();
 
         let requests = vec![request];
         let mut secret_request = SecretRequest::new();
