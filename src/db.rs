@@ -11,9 +11,16 @@ use std::env;
 use std::result::Result::Ok;
 use uuid::Uuid;
 
+use log::*;
+use regex::RegexSet;
 use serde::{Deserialize, Serialize};
 use sqlx::any::AnyPoolOptions;
+use sqlx::mysql::MySqlPoolOptions;
+use sqlx::postgres::PgPoolOptions;
+use sqlx::postgres::PgRow;
 use sqlx::AnyPool;
+use sqlx::MySqlPool;
+use sqlx::PgPool;
 use sqlx::Row;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,12 +46,59 @@ impl Default for Connection {
     }
 }
 
+/// check_input is meant to check string fields that are passed to db functions to input or get
+/// data required for simple-kbs functions.  It will check for common sql injection attacks in
+/// variables passed and log suspect strings to central logging facilities returning false.  If a
+/// string passes our checks, check_input returns true.
+pub fn check_input(field: String) -> bool {
+    let str_check = field.to_lowercase();
+    let check_set = RegexSet::new(&[
+        r"[']{0,}1[']{0,}\s{0,}=\s{0,}[']{0,}1[']{0,}",
+        r"drop",
+        r"select\s{0,}[*]",
+        r"user",
+        r"password",
+        r"alter",
+        r"delete",
+    ])
+    .unwrap();
+    let check_matches: Vec<_> = check_set.matches(&str_check).into_iter().collect();
+
+    if !check_matches.is_empty() {
+        for match_num in check_matches.iter() {
+            match match_num {
+                0 => error!("db::check_input - found 1 = 1 statement in input"),
+                1 => error!("db::check_input - found drop statement in input"),
+                2 => error!("db::check_input - found select statement in input"),
+                3 => error!("db::check_input - found user statement in input"),
+                4 => error!("db::check_input - found password statement in input"),
+                5 => error!("db::check_input - found alter statement in input"),
+                6 => error!("db::check_input - found delete statement in input"),
+                _ => error!("db::check_input - found uncharacterized statement in input"),
+            };
+        }
+        false
+    } else {
+        true
+    }
+}
+
 pub async fn get_dbpool() -> Result<AnyPool> {
     let db_type = env::var("KBS_DB_TYPE").expect("KBS_DB_TYPE not set");
     let host_name = env::var("KBS_DB_HOST").expect("KBS_DB_HOST not set");
     let user_name = env::var("KBS_DB_USER").expect("KBS_DB_USER not set.");
     let db_pw = env::var("KBS_DB_PW").expect("KBS_DB_PW not set.");
     let data_base = env::var("KBS_DB").expect("KBS_DB not set");
+
+    if !check_input(db_type.to_string())
+        || !check_input(host_name.to_string())
+        || !check_input(user_name.to_string())
+        || !check_input(db_pw.to_string())
+        || !check_input(data_base.to_string())
+    {
+        error!("db::get_dbpool- env vars db_type, host_name, user_name, db_pw, or database did not pass sql injection check");
+        return Err(anyhow!("db::get_dbpool- env vars db_type, host_name, user_name, db_pw, or database did not pass sql injection check"));
+    }
 
     let db_url = format!(
         "{}://{}:{}@{}/{}",
@@ -55,300 +109,988 @@ pub async fn get_dbpool() -> Result<AnyPool> {
         .max_connections(1000)
         .connect(&db_url)
         .await
-        .map_err(|e| anyhow!("Encountered error trying to create database pool: {}", e))?;
+        .map_err(|e| {
+            anyhow!(
+                "db::get_db_pool:: Encountered error trying to create database pool: {}",
+                e
+            )
+        })?;
+    Ok(db_pool)
+}
+
+pub async fn get_mysql_dbpool() -> Result<MySqlPool> {
+    let db_type = env::var("KBS_DB_TYPE").expect("KBS_DB_TYPE not set");
+    let host_name = env::var("KBS_DB_HOST").expect("KBS_DB_HOST not set");
+    let user_name = env::var("KBS_DB_USER").expect("KBS_DB_USER not set.");
+    let db_pw = env::var("KBS_DB_PW").expect("KBS_DB_PW not set.");
+    let data_base = env::var("KBS_DB").expect("KBS_DB not set");
+
+    if !check_input(db_type.to_string())
+        || !check_input(host_name.to_string())
+        || !check_input(user_name.to_string())
+        || !check_input(db_pw.to_string())
+        || !check_input(data_base.to_string())
+    {
+        error!("db::get_mysql_dbpool- env vars db_type, host_name, user_name, db_pw, or database did not pass sql injection check");
+        return Err(anyhow!("db::get_mysql_dbpool- env vars db_type, host_name, user_name, db_pw, or database did not pass sql injection check"));
+    }
+
+    let db_url = format!(
+        "{}://{}:{}@{}/{}",
+        db_type, user_name, db_pw, host_name, data_base
+    );
+
+    let db_pool = MySqlPoolOptions::new()
+        .max_connections(1000)
+        .connect(&db_url)
+        .await
+        .map_err(|e| {
+            anyhow!(
+                "db::get_mysql_dbpool - Encountered error trying to create database pool: {}",
+                e
+            )
+        })?;
+    Ok(db_pool)
+}
+
+pub async fn get_postgres_dbpool() -> Result<PgPool> {
+    let db_type = env::var("KBS_DB_TYPE").expect("KBS_DB_TYPE not set");
+    let host_name = env::var("KBS_DB_HOST").expect("KBS_DB_HOST not set");
+    let user_name = env::var("KBS_DB_USER").expect("KBS_DB_USER not set.");
+    let db_pw = env::var("KBS_DB_PW").expect("KBS_DB_PW not set.");
+    let data_base = env::var("KBS_DB").expect("KBS_DB not set");
+
+    if !check_input(db_type.to_string())
+        || !check_input(host_name.to_string())
+        || !check_input(user_name.to_string())
+        || !check_input(db_pw.to_string())
+        || !check_input(data_base.to_string())
+    {
+        error!("db::get_postgres_dbpool- env vars db_type, host_name, user_name, db_pw, or database did not pass sql injection check");
+        return Err(anyhow!("db::get_postgres_dbpool- env vars db_type, host_name, user_name, db_pw, or database did not pass sql injection check"));
+    }
+
+    let db_url = format!(
+        "{}://{}:{}@{}/{}",
+        db_type, user_name, db_pw, host_name, data_base
+    );
+
+    let db_pool = PgPoolOptions::new()
+        .max_connections(1000)
+        .connect(&db_url)
+        .await
+        .map_err(|e| {
+            anyhow!(
+                "db::get_mysql_dbpool - Encountered error trying to create database pool: {}",
+                e
+            )
+        })?;
     Ok(db_pool)
 }
 
 pub async fn insert_connection(connection: Connection) -> Result<Uuid> {
-    let dbpool = get_dbpool().await?;
+    // Check strings in Connection struct for sql injection -- other types have built in checks
+    if !check_input(connection.launch_description.clone())
+        || !check_input(connection.fw_digest.clone())
+    {
+        error!("db::insert_connection- fields launch_description or fw_digest did not pass sql injection check");
+        return Err(anyhow!("db::insert_connection- fields launch_description or fw_digest did not pass sql injection check"));
+    }
 
     let nwuuid = Uuid::new_v4();
     let uuidstr = nwuuid.as_hyphenated().to_string();
 
-    let query = format!("insert into conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, create_date) VALUES(\"{}\", {}, {}, {}, {}, \"{}\", \"{}\", NOW())", 
-     uuidstr,
-     connection.policy,
-     connection.fw_api_major,
-     connection.fw_api_minor,
-     connection.fw_build_id,
-     connection.launch_description,
-     connection.fw_digest
-     );
-
-    sqlx::query(query.as_str()).execute(&dbpool).await?;
-
-    Ok(nwuuid)
+    let db_type = env::var("KBS_DB_TYPE")
+        .expect("KBS_DB_TYPE not set")
+        .to_lowercase();
+    match db_type.as_str() {
+        "mysql" | "sqlite" => {
+            let dbpool = get_mysql_dbpool().await?;
+            sqlx::query("insert into conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, create_date) VALUES(?, ?, ?, ?, ?, ?, ?, NOW())")
+                .bind(uuidstr)
+                .bind(connection.policy)
+                .bind(connection.fw_api_major)
+                .bind(connection.fw_api_minor)
+                .bind(connection.fw_build_id)
+                .bind(&connection.launch_description)
+                .bind(&connection.fw_digest)
+                .execute(&dbpool)
+                .await?;
+            Ok(nwuuid)
+        }
+        "postgres" => {
+            let dbpool = get_postgres_dbpool().await?;
+            sqlx::query("insert into conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, create_date) VALUES($1, $2, $3, $4, $5, $6, $7, NOW())")
+                .bind(uuidstr)
+                .bind(connection.policy)
+                .bind(connection.fw_api_major)
+                .bind(connection.fw_api_minor)
+                .bind(connection.fw_build_id)
+                .bind(&connection.launch_description)
+                .bind(&connection.fw_digest)
+                .execute(&dbpool)
+                .await?;
+            Ok(nwuuid)
+        }
+        _ => {
+            error!(
+                "db::insert_connection- error, this is not a mysql, sqlite, or postgres connection"
+            );
+            Err(anyhow!(
+                "db::insert_connection- error, this is not a mysql, sqlite, or postgres connection"
+            ))
+        }
+    }
 }
 
 pub async fn get_connection(uuid: Uuid) -> Result<Connection> {
-    let dbpool = get_dbpool().await?;
-
     let uuidstr = uuid.as_hyphenated().to_string();
-    let query = format!("SELECT policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest FROM conn_bundle WHERE id = \"{}\"", uuidstr);
 
-    let con_row = sqlx::query(query.as_str()).fetch_one(&dbpool).await?;
+    if !check_input(uuidstr.clone()) {
+        error!("db::get_connection- field uuid did not pass sql injection check");
+        return Err(anyhow!(
+            "db::get_connection- field uuid did not pass sql injection check"
+        ));
+    }
+    let db_type = env::var("KBS_DB_TYPE")
+        .expect("KBS_DB_TYPE not set")
+        .to_lowercase();
 
-    Ok(Connection {
-        policy: con_row.try_get::<i32, _>(0)? as u32,
-        fw_api_major: con_row.try_get::<i32, _>(1)? as u32,
-        fw_api_minor: con_row.try_get::<i32, _>(2)? as u32,
-        fw_build_id: con_row.try_get::<i32, _>(3)? as u32,
-        launch_description: con_row.try_get::<String, _>(4)?,
-        fw_digest: con_row.try_get::<String, _>(5)?,
-    })
+    match db_type.as_str() {
+        "mysql" | "sqlite" => {
+            let dbpool = get_mysql_dbpool().await?;
+            let con_row =
+                sqlx::query("SELECT policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest FROM conn_bundle WHERE id = ?")
+                .bind(uuidstr)
+                .fetch_one(&dbpool)
+                .await?;
+            Ok(Connection {
+                policy: con_row.try_get::<i32, _>(0)? as u32,
+                fw_api_major: con_row.try_get::<i32, _>(1)? as u32,
+                fw_api_minor: con_row.try_get::<i32, _>(2)? as u32,
+                fw_build_id: con_row.try_get::<i32, _>(3)? as u32,
+                launch_description: con_row.try_get::<String, _>(4)?,
+                fw_digest: con_row.try_get::<String, _>(5)?,
+            })
+        }
+        "postgres" => {
+            let dbpool = get_postgres_dbpool().await?;
+            let con_row =
+                sqlx::query("SELECT policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest FROM conn_bundle WHERE id = $1")
+                .bind(uuidstr)
+                .fetch_one(&dbpool)
+                .await?;
+            Ok(Connection {
+                policy: con_row.try_get::<i32, _>(0)? as u32,
+                fw_api_major: con_row.try_get::<i32, _>(1)? as u32,
+                fw_api_minor: con_row.try_get::<i32, _>(2)? as u32,
+                fw_build_id: con_row.try_get::<i32, _>(3)? as u32,
+                launch_description: con_row.try_get::<String, _>(4)?,
+                fw_digest: con_row.try_get::<String, _>(5)?,
+            })
+        }
+        _ => {
+            error!(
+                "db::insert_connection- error, this is not a mysql, sqlite, or postgres connection"
+            );
+            Err(anyhow!(
+                "db::insert_connection- error, this is not a mysql, sqlite, or postgres connection"
+            ))
+        }
+    }
 }
 
 pub async fn delete_connection(uuid: Uuid) -> Result<Uuid> {
-    let dbpool = get_dbpool().await?;
+    let uuidstr = uuid.as_hyphenated().to_string();
 
-    let query = format!(
-        "DELETE from conn_bundle WHERE id = \"{}\"",
-        uuid.as_hyphenated()
-    );
+    if !check_input(uuidstr.clone()) {
+        error!("db::get_connection- field uuid did not pass sql injection check");
+        return Err(anyhow!(
+            "db::get_connection- field uuid did not pass sql injection check"
+        ));
+    }
+    let db_type = env::var("KBS_DB_TYPE")
+        .expect("KBS_DB_TYPE not set")
+        .to_lowercase();
 
-    sqlx::query(query.as_str()).execute(&dbpool).await?;
-    Ok(uuid)
+    match db_type.as_str() {
+        "mysql" | "sqlite" => {
+            let dbpool = get_mysql_dbpool().await?;
+            sqlx::query("DELETE from conn_bundle WHERE id = ?")
+                .bind(uuidstr)
+                .execute(&dbpool)
+                .await?;
+            Ok(uuid)
+        }
+        "postgres" => {
+            let dbpool = get_postgres_dbpool().await?;
+            sqlx::query("DELETE from conn_bundle WHERE id = $1")
+                .bind(uuidstr)
+                .execute(&dbpool)
+                .await?;
+            Ok(uuid)
+        }
+        _ => {
+            error!(
+                "db::delete_connection- error, this is not a mysql, sqlite, or postgres connection"
+            );
+            Err(anyhow!(
+                "db::delete_connection- error, this is not a mysql, sqlite, or postgres connection"
+            ))
+        }
+    }
 }
 
 pub async fn insert_policy(policy: &policy::Policy) -> Result<u64> {
-    let dbpool = get_dbpool().await?;
-
     let allowed_digests_json = serde_json::to_string(&policy.allowed_digests)?;
     let allowed_policies_json = serde_json::to_string(&policy.allowed_policies)?;
     let allowed_build_ids_json = serde_json::to_string(&policy.allowed_build_ids)?;
 
-    let query = format!(
-        "INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(\'{}\', \'{}\', {}, {}, \'{}\', NOW(), 1)",
-        allowed_digests_json,
-        allowed_policies_json,
-        policy.min_fw_api_major,
-        policy.min_fw_api_minor,
-        allowed_build_ids_json
-    );
+    if !check_input(allowed_digests_json.clone())
+        || !check_input(allowed_policies_json.clone())
+        || !check_input(allowed_build_ids_json.clone())
+    {
+        error!("db::insert_policy- json fields passed to insert_policy did not pass sql injection check");
+        return Err(anyhow!("db::insert_policy- json fields passed to insert_policy did not pass sql injection check"));
+    }
 
-    let last_insert_row = sqlx::query(query.as_str())
-        .execute(&dbpool)
-        .await?
-        .last_insert_id();
+    let db_type = env::var("KBS_DB_TYPE")
+        .expect("KBS_DB_TYPE not set")
+        .to_lowercase();
+    match db_type.as_str() {
+        "mysql" | "sqlite" => {
+            let dbpool = get_mysql_dbpool().await?;
+            let last_insert_row = sqlx::query("INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(?, ?, ?, ?, ?, NOW(), 1)")
+                .bind(allowed_digests_json)
+                .bind(allowed_policies_json)
+                .bind(policy.min_fw_api_major)
+                .bind(policy.min_fw_api_minor)
+                .bind(allowed_build_ids_json)
+                .execute(&dbpool)
+                .await?
+                .last_insert_id();
 
-    let last_insert_id = last_insert_row
-        .ok_or_else(|| anyhow!("db::insert_policy - error, unable to get last_insert_row"))?;
+            Ok(last_insert_row)
+        }
+        "postgres" => {
+            let dbpool = get_postgres_dbpool().await?;
+            let last_insert_row = sqlx::query("insert into conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, create_date) VALUES($1, $2, $3, $4, $5, $6, $7, NOW()) RETURNING id")
+                .bind(allowed_digests_json)
+                .bind(allowed_policies_json)
+                .bind(policy.min_fw_api_major)
+                .bind(policy.min_fw_api_minor)
+                .bind(allowed_build_ids_json)
+                .try_map(| row: PgRow | row.try_get::<i64, _>(0))
+                .fetch_one(&dbpool)
+                .await?;
 
-    Ok(last_insert_id as u64)
+            Ok(last_insert_row as u64)
+        }
+        _ => {
+            error!(
+                "db::insert_connection- error, this is not a mysql, sqlite, or postgres connection"
+            );
+            Err(anyhow!(
+                "db::insert_connection- error, this is not a mysql, sqlite, or postgres connection"
+            ))
+        }
+    }
 }
 
 pub async fn get_policy(pid: u64) -> Result<policy::Policy> {
-    let dbpool = get_dbpool().await?;
+    let db_type = env::var("KBS_DB_TYPE")
+        .expect("KBS_DB_TYPE not set")
+        .to_lowercase();
 
-    let query = format!("SELECT allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids FROM policy WHERE id = {} AND valid = 1", pid);
-    let row_vec = sqlx::query(query.as_str()).fetch_one(&dbpool).await?;
-    Ok(policy::Policy {
-        allowed_digests: serde_json::from_str(&row_vec.try_get::<String, _>(0)?)?,
-        allowed_policies: serde_json::from_str(&row_vec.try_get::<String, _>(1)?)?,
-        min_fw_api_major: row_vec.try_get::<i32, _>(2)? as u32,
-        min_fw_api_minor: row_vec.try_get::<i32, _>(3)? as u32,
-        allowed_build_ids: serde_json::from_str(&row_vec.try_get::<String, _>(4)?)?,
-    })
-}
-
-pub async fn get_secret_policy(sec: &str) -> Result<policy::Policy> {
-    let dbpool = get_dbpool().await?;
-
-    let query = format!("SELECT polid FROM secrets WHERE secret_id = \'{}\'", sec);
-
-    let val_row = sqlx::query(query.as_str()).fetch_one(&dbpool).await?;
-
-    let val = val_row.try_get::<i32, _>(0)? as u64;
-    let secret_policy = get_policy(val).await?;
-    Ok(secret_policy)
+    match db_type.as_str() {
+        "mysql" | "sqlite" => {
+            let dbpool = get_mysql_dbpool().await?;
+            let row_vec =
+                sqlx::query("SELECT allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids FROM policy WHERE id = ? AND valid = 1")
+                .bind(pid)
+                .fetch_one(&dbpool)
+                .await?;
+            Ok(policy::Policy {
+                allowed_digests: serde_json::from_str(&row_vec.try_get::<String, _>(0)?)?,
+                allowed_policies: serde_json::from_str(&row_vec.try_get::<String, _>(1)?)?,
+                min_fw_api_major: row_vec.try_get::<i32, _>(2)? as u32,
+                min_fw_api_minor: row_vec.try_get::<i32, _>(3)? as u32,
+                allowed_build_ids: serde_json::from_str(&row_vec.try_get::<String, _>(4)?)?,
+            })
+        }
+        "postgres" => {
+            let dbpool = get_postgres_dbpool().await?;
+            let row_vec =
+                sqlx::query("SELECT allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids FROM policy WHERE id = $1 AND valid = 1")
+                .bind(pid as i64)
+                .fetch_one(&dbpool)
+                .await?;
+            Ok(policy::Policy {
+                allowed_digests: serde_json::from_str(&row_vec.try_get::<String, _>(0)?)?,
+                allowed_policies: serde_json::from_str(&row_vec.try_get::<String, _>(1)?)?,
+                min_fw_api_major: row_vec.try_get::<i32, _>(2)? as u32,
+                min_fw_api_minor: row_vec.try_get::<i32, _>(3)? as u32,
+                allowed_build_ids: serde_json::from_str(&row_vec.try_get::<String, _>(4)?)?,
+            })
+        }
+        _ => {
+            error!(
+                "db::insert_connection- error, this is not a mysql, sqlite, or postgres connection"
+            );
+            Err(anyhow!(
+                "db::insert_connection- error, this is not a mysql, sqlite, or postgres connection"
+            ))
+        }
+    }
 }
 
 pub async fn delete_policy(pid: &u64) -> Result<()> {
-    let dbpool = get_dbpool().await?;
+    let db_type = env::var("KBS_DB_TYPE")
+        .expect("KBS_DB_TYPE not set")
+        .to_lowercase();
 
-    let query = format!("DELETE from policy WHERE id = {}", pid);
-    sqlx::query(query.as_str()).execute(&dbpool).await?;
-    Ok(())
+    match db_type.as_str() {
+        "mysql" | "sqlite" => {
+            let dbpool = get_mysql_dbpool().await?;
+            sqlx::query("DELETE from policy WHERE id = ?")
+                .bind(pid)
+                .execute(&dbpool)
+                .await?;
+            Ok(())
+        }
+        "postgres" => {
+            let dbpool = get_postgres_dbpool().await?;
+            sqlx::query("DELETE from policy WHERE id = $1")
+                .bind(*pid as i64)
+                .execute(&dbpool)
+                .await?;
+            Ok(())
+        }
+        _ => {
+            error!(
+                "db::delete_connection- error, this is not a mysql, sqlite, or postgres connection"
+            );
+            Err(anyhow!(
+                "db::delete_connection- error, this is not a mysql, sqlite, or postgres connection"
+            ))
+        }
+    }
+}
+
+pub async fn get_secret_policy(sec: &str) -> Result<policy::Policy> {
+    if !check_input(sec.to_string()) {
+        error!("db::get_secret_policy- field sec did not pass sql injection check");
+        return Err(anyhow!(
+            "db::get_secret_policy- field sec did not pass sql injection check"
+        ));
+    }
+
+    let db_type = env::var("KBS_DB_TYPE")
+        .expect("KBS_DB_TYPE not set")
+        .to_lowercase();
+
+    match db_type.as_str() {
+        "mysql" | "sqlite" => {
+            let dbpool = get_mysql_dbpool().await?;
+            let pol_row = sqlx::query("SELECT polid FROM secrets WHERE secret_id = ?")
+                .bind(sec)
+                .fetch_one(&dbpool)
+                .await?;
+            let pol = pol_row.try_get::<i32, _>(0)? as u64;
+            let secret_policy = get_policy(pol).await?;
+            Ok(secret_policy)
+        }
+        "postgres" => {
+            let dbpool = get_postgres_dbpool().await?;
+            let pol_row = sqlx::query("SELECT polid FROM secrets WHERE secret_id = $1")
+                .bind(sec)
+                .fetch_one(&dbpool)
+                .await?;
+            let pol = pol_row.try_get::<i32, _>(0)? as u64;
+            let secret_policy = get_policy(pol).await?;
+            Ok(secret_policy)
+        }
+        _ => {
+            error!(
+                "db::get_secret_policy- error, this is not a mysql, sqlite, or postgres connection"
+            );
+            Err(anyhow!(
+                "db::get_secret_policy- error, this is not a mysql, sqlite, or postgres connection"
+            ))
+        }
+    }
 }
 
 pub async fn insert_keyset(ksetid: &str, kskeys: &[String], polid: Option<u32>) -> Result<()> {
-    let dbpool = get_dbpool().await?;
-
-    // Create JSON for vector struct member variables
     let kskeys_str = serde_json::to_string(kskeys)?;
 
-    let query = match polid {
-        Some(p) => format!(
-            "INSERT INTO keysets (keysetid, kskeys, polid) VALUES(\'{}\', \'{}\', {})",
-            ksetid, kskeys_str, p
-        ),
-        None => format!(
-            "INSERT INTO keysets (keysetid, kskeys) VALUES( \'{}\', \'{}\')",
-            ksetid, kskeys_str
-        ),
-    };
+    if !check_input(ksetid.to_string()) || !check_input(kskeys_str.clone()) {
+        error!("db::insert_keyset- json fields passed to insert_policy did not pass sql injection check");
+        return Err(anyhow!("db::insert_keyset- json fields passed to insert_policy did not pass sql injection check"));
+    }
 
-    sqlx::query(query.as_str()).execute(&dbpool).await?;
+    let db_type = env::var("KBS_DB_TYPE")
+        .expect("KBS_DB_TYPE not set")
+        .to_lowercase();
+    match db_type.as_str() {
+        "mysql" | "sqlite" => {
+            let dbpool = get_mysql_dbpool().await?;
+            let last_insert_id = match polid {
+                Some(p) => {
+                    sqlx::query("INSERT INTO keysets (keysetid, kskeys, polid) VALUES(?, ?, ?)")
+                        .bind(ksetid)
+                        .bind(&kskeys_str)
+                        .bind(p)
+                        .execute(&dbpool)
+                        .await?
+                        .last_insert_id();
+                }
+                None => {
+                    sqlx::query("INSERT INTO keysets (keysetid, kskeys) VALUES(?, ?)")
+                        .bind(ksetid)
+                        .bind(&kskeys_str)
+                        .execute(&dbpool)
+                        .await?
+                        .last_insert_id();
+                }
+            };
 
-    Ok(())
+            Ok(last_insert_id)
+        }
+        "postgres" => {
+            let dbpool = get_postgres_dbpool().await?;
+            let last_insert_id = match polid {
+                Some(p) => {
+                    sqlx::query(
+                        "INSERT INTO keysets (keysetid, kskeys, polid) VALUES($1, $2, $3) RETURNING id"
+                    )
+                         .bind(ksetid)
+                         .bind(&kskeys_str)
+                         .bind(p)
+                         .execute(&dbpool)
+                         .await?;
+                }
+                None => {
+                    sqlx::query(
+                        "INSERT INTO keysets (keysetid, kskeys) VALUES($1, $2) RETURNING id",
+                    )
+                    .bind(ksetid)
+                    .bind(&kskeys_str)
+                    .execute(&dbpool)
+                    .await?;
+                }
+            };
+
+            Ok(last_insert_id)
+        }
+        _ => {
+            error!("db::insert_keyset- error, this is not a mysql, sqlite, or postgres connection");
+            Err(anyhow!(
+                "db::insert_keyset- error, this is not a mysql, sqlite, or postgres connection"
+            ))
+        }
+    }
 }
 
 pub async fn delete_keyset(ksetid: &str) -> Result<()> {
-    let dbpool = get_dbpool().await?;
+    if !check_input(ksetid.to_string()) {
+        error!("db::delete_keyset- json fields passed to delete_keyset did not pass sql injection check");
+        return Err(anyhow!("db::delete_keyset- json fields passed to delete_keyset did not pass sql injection check"));
+    }
 
-    /* create JSON for vector struct member variables */
+    let db_type = env::var("KBS_DB_TYPE")
+        .expect("KBS_DB_TYPE not set")
+        .to_lowercase();
 
-    let query = format!("DELETE from keysets WHERE keysetid = \'{}\'", ksetid);
-
-    sqlx::query(query.as_str()).execute(&dbpool).await?;
-
-    Ok(())
+    match db_type.as_str() {
+        "mysql" | "sqlite" => {
+            let dbpool = get_mysql_dbpool().await?;
+            sqlx::query("DELETE from keysets WHERE keysetid = ?")
+                .bind(ksetid)
+                .execute(&dbpool)
+                .await?;
+            Ok(())
+        }
+        "postgres" => {
+            let dbpool = get_postgres_dbpool().await?;
+            sqlx::query("DELETE from keysets WHERE keysetid = $1")
+                .bind(ksetid)
+                .execute(&dbpool)
+                .await?;
+            Ok(())
+        }
+        _ => {
+            error!("db::delete_keyset- error, this is not a mysql, sqlite, or postgres connection");
+            Err(anyhow!(
+                "db::delete_keyset- error, this is not a mysql, sqlite, or postgres connection"
+            ))
+        }
+    }
 }
 
 pub async fn get_keyset_policy(keysetid: &str) -> Result<policy::Policy> {
-    let dbpool = get_dbpool().await?;
+    if !check_input(keysetid.to_string()) {
+        error!("db::get_keyset_policy- field sec did not pass sql injection check");
+        return Err(anyhow!(
+            "db::get_keyset_policy- field sec did not pass sql injection check"
+        ));
+    }
 
-    let query = format!(
-        "SELECT polid FROM keysets WHERE keysetid = \'{}\'",
-        keysetid
-    );
+    let db_type = env::var("KBS_DB_TYPE")
+        .expect("KBS_DB_TYPE not set")
+        .to_lowercase();
 
-    let polid_row = sqlx::query(query.as_str()).fetch_one(&dbpool).await?;
-
-    let keyset_policy_id = polid_row.try_get::<i32, _>(0)? as u64;
-
-    let retpol = get_policy(keyset_policy_id).await?;
-
-    Ok(retpol)
+    match db_type.as_str() {
+        "mysql" | "sqlite" => {
+            let dbpool = get_mysql_dbpool().await?;
+            let pol_row = sqlx::query("SELECT polid FROM keysets WHERE keysetid = ?")
+                .bind(keysetid)
+                .fetch_one(&dbpool)
+                .await?;
+            let pol = pol_row.try_get::<i32, _>(0)? as u64;
+            let secret_policy = get_policy(pol).await?;
+            Ok(secret_policy)
+        }
+        "postgres" => {
+            let dbpool = get_postgres_dbpool().await?;
+            let pol_row = sqlx::query("SELECT polid FROM secrets WHERE keysetid = $1")
+                .bind(keysetid)
+                .fetch_one(&dbpool)
+                .await?;
+            let pol = pol_row.try_get::<i32, _>(0)? as u64;
+            let secret_policy = get_policy(pol).await?;
+            Ok(secret_policy)
+        }
+        _ => {
+            error!(
+                "db::get_secret_policy- error, this is not a mysql, sqlite, or postgres connection"
+            );
+            Err(anyhow!(
+                "db::get_secret_policy- error, this is not a mysql, sqlite, or postgres connection"
+            ))
+        }
+    }
 }
 
-pub async fn get_keyset_ids(keyset_id: &str) -> Result<Vec<String>> {
-    let dbpool = get_dbpool().await?;
+pub async fn get_keyset_ids(keysetid: &str) -> Result<Vec<String>> {
+    if !check_input(keysetid.to_string()) {
+        error!("db::get_keyset_ids- field sec did not pass sql injection check");
+        return Err(anyhow!(
+            "db::get_keyset_ids- field sec did not pass sql injection check"
+        ));
+    }
 
-    let query = format!(
-        "SELECT kskeys FROM keysets WHERE keysetid = \'{}\'",
-        keyset_id
-    );
+    let db_type = env::var("KBS_DB_TYPE")
+        .expect("KBS_DB_TYPE not set")
+        .to_lowercase();
 
-    let keyset_row = sqlx::query(query.as_str()).fetch_one(&dbpool).await?;
-
-    let rks: Vec<String> = serde_json::from_str(&keyset_row.try_get::<String, _>(0)?).unwrap();
-
-    Ok(rks)
+    match db_type.as_str() {
+        "mysql" | "sqlite" => {
+            let dbpool = get_mysql_dbpool().await?;
+            let keyset_row = sqlx::query("SELECT kskeys FROM keysets WHERE keysetid = ?")
+                .bind(keysetid)
+                .fetch_one(&dbpool)
+                .await?;
+            let rks: Vec<String> =
+                serde_json::from_str(&keyset_row.try_get::<String, _>(0)?).unwrap();
+            Ok(rks)
+        }
+        "postgres" => {
+            let dbpool = get_postgres_dbpool().await?;
+            let keyset_row = sqlx::query("SELECT kskeys FROM keysets WHERE keysetid = $1")
+                .bind(keysetid)
+                .fetch_one(&dbpool)
+                .await?;
+            let rks: Vec<String> =
+                serde_json::from_str(&keyset_row.try_get::<String, _>(0)?).unwrap();
+            Ok(rks)
+        }
+        _ => {
+            error!(
+                "db::get_keyset_ids- error, this is not a mysql, sqlite, or postgres connection"
+            );
+            Err(anyhow!(
+                "db::get_keyset_ids- error, this is not a mysql, sqlite, or postgres connection"
+            ))
+        }
+    }
 }
 
 pub async fn get_secret(secret_id: &str) -> Result<request::Key> {
-    let dbpool = get_dbpool().await?;
+    if !check_input(secret_id.to_string()) {
+        error!("db::get_secret- field sec did not pass sql injection check");
+        return Err(anyhow!(
+            "db::get_secret- field sec did not pass sql injection check"
+        ));
+    }
 
-    let query = format!(
-        "SELECT secret FROM secrets WHERE secret_id = \'{}\'",
-        secret_id
-    );
+    let db_type = env::var("KBS_DB_TYPE")
+        .expect("KBS_DB_TYPE not set")
+        .to_lowercase();
 
-    let payload_row = sqlx::query(query.as_str()).fetch_one(&dbpool).await?;
-
-    let payload = payload_row.try_get::<String, _>(0)?;
-
-    Ok(request::Key {
-        id: secret_id.to_string(),
-        payload,
-    })
+    match db_type.as_str() {
+        "mysql" | "sqlite" => {
+            let dbpool = get_mysql_dbpool().await?;
+            let secret_row = sqlx::query("SELECT secret FROM secrets WHERE secret_id = ?")
+                .bind(secret_id)
+                .fetch_one(&dbpool)
+                .await?;
+            let secret = secret_row.try_get::<String, _>(0)?;
+            Ok(request::Key {
+                id: secret_id.to_string(),
+                payload: secret,
+            })
+        }
+        "postgres" => {
+            let dbpool = get_postgres_dbpool().await?;
+            let secret_row = sqlx::query("SELECT secret FROM secrets WHERE secret_id = $1")
+                .bind(secret_id)
+                .fetch_one(&dbpool)
+                .await?;
+            let secret = secret_row.try_get::<String, _>(0)?;
+            Ok(request::Key {
+                id: secret_id.to_string(),
+                payload: secret,
+            })
+        }
+        _ => {
+            error!(
+                "db::get_keyset_ids- error, this is not a mysql, sqlite, or postgres connection"
+            );
+            Err(anyhow!(
+                "db::get_keyset_ids- error, this is not a mysql, sqlite, or postgres connection"
+            ))
+        }
+    }
 }
 
 pub async fn insert_secret(secret_id: &str, secret: &str, policy_id: Option<u64>) -> Result<()> {
-    let dbpool = get_dbpool().await?;
+    if !check_input(secret_id.to_string()) || !check_input(secret.to_string()) {
+        error!(
+            "db::insert_secret- fields passed to insert_secret did not pass sql injection check"
+        );
+        return Err(anyhow!(
+            "db::insert_secret- fields passed to insert_secret did not pass sql injection check"
+        ));
+    }
 
-    let query = match policy_id {
-        Some(p) => format!(
-            "INSERT INTO secrets (secret_id, secret, polid ) VALUES(\'{}\', \'{}\', \'{}\')",
-            secret_id, secret, p
-        ),
-        None => format!(
-            "INSERT INTO secrets (secret_id, secret ) VALUES(\'{}\', \'{}\')",
-            secret_id, secret
-        ),
-    };
+    let db_type = env::var("KBS_DB_TYPE")
+        .expect("KBS_DB_TYPE not set")
+        .to_lowercase();
+    match db_type.as_str() {
+        "mysql" | "sqlite" => {
+            let dbpool = get_mysql_dbpool().await?;
+            let last_insert_id = match policy_id {
+                Some(p) => {
+                    sqlx::query("INSERT INTO secrets (secret_id, secret, polid ) VALUES(?, ?, ?)")
+                        .bind(secret_id)
+                        .bind(secret)
+                        .bind(p)
+                        .execute(&dbpool)
+                        .await?
+                        .last_insert_id();
+                }
+                None => {
+                    sqlx::query("INSERT INTO secrets (secret_id, secret) VALUES(?, ?)")
+                        .bind(secret_id)
+                        .bind(secret)
+                        .execute(&dbpool)
+                        .await?
+                        .last_insert_id();
+                }
+            };
 
-    sqlx::query(query.as_str()).execute(&dbpool).await?;
+            Ok(last_insert_id)
+        }
+        "postgres" => {
+            let dbpool = get_postgres_dbpool().await?;
+            let last_insert_id = match policy_id {
+                Some(p) => {
+                    sqlx::query(
+                        "INSERT INTO secrets (secret_id, secret, polid) VALUES($1, $2, $3) RETURNING id"
+                    )
+                         .bind(secret_id)
+                         .bind(&secret)
+                         .bind(p as i64)
+                         .execute(&dbpool)
+                         .await?;
+                }
+                None => {
+                    sqlx::query(
+                        "INSERT INTO keysets (secret_id, secret) VALUES($1, $2) RETURNING id",
+                    )
+                    .bind(secret_id)
+                    .bind(secret)
+                    .execute(&dbpool)
+                    .await?;
+                }
+            };
 
-    Ok(())
+            Ok(last_insert_id)
+        }
+        _ => {
+            error!("db::insert_secret- error, this is not a mysql, sqlite, or postgres connection");
+            Err(anyhow!(
+                "db::insert_secret- error, this is not a mysql, sqlite, or postgres connection"
+            ))
+        }
+    }
 }
 
 pub async fn delete_secret(secret_id: &str) -> Result<()> {
-    let dbpool = get_dbpool().await?;
+    if !check_input(secret_id.to_string()) {
+        error!(
+            "db::delete_secret- fields passed to delete_secret did not pass sql injection check"
+        );
+        return Err(anyhow!(
+            "db::delete_secret- fields passed to delete_keyset did not pass sql injection check"
+        ));
+    }
 
-    let query = format!("DELETE from secrets WHERE secret_id = \'{}\'", secret_id);
+    let db_type = env::var("KBS_DB_TYPE")
+        .expect("KBS_DB_TYPE not set")
+        .to_lowercase();
 
-    sqlx::query(query.as_str()).execute(&dbpool).await?;
-
-    Ok(())
+    match db_type.as_str() {
+        "mysql" | "sqlite" => {
+            let dbpool = get_mysql_dbpool().await?;
+            sqlx::query("DELETE from secrets WHERE secret_id = ?")
+                .bind(secret_id)
+                .execute(&dbpool)
+                .await?;
+            Ok(())
+        }
+        "postgres" => {
+            let dbpool = get_postgres_dbpool().await?;
+            sqlx::query("DELETE from secrets WHERE secret_id = $1")
+                .bind(secret_id)
+                .execute(&dbpool)
+                .await?;
+            Ok(())
+        }
+        _ => {
+            error!("db::delete_secret- error, this is not a mysql, sqlite, or postgres connection");
+            Err(anyhow!(
+                "db::delete_secret- error, this is not a mysql, sqlite, or postgres connection"
+            ))
+        }
+    }
 }
 
 // ------------------------------------------------------------------------------------
 
 pub async fn insert_report_keypair(id: &str, keypair: &[u8], policy_id: Option<u64>) -> Result<()> {
-    let dbpool = get_dbpool().await?;
-
+    if !check_input(id.to_string()) {
+        error!(
+            "db::insert_report_keypair- field passed to insert_secret did not pass sql injection check"
+        );
+        return Err(anyhow!(
+            "db::insert_report_keypair- field passed to insert_secret did not pass sql injection check"
+        ));
+    }
     let keypair_b64 = base64::encode(&keypair);
+    let db_type = env::var("KBS_DB_TYPE")
+        .expect("KBS_DB_TYPE not set")
+        .to_lowercase();
+    match db_type.as_str() {
+        "mysql" | "sqlite" => {
+            let dbpool = get_mysql_dbpool().await?;
+            let last_insert_id = match policy_id {
+                Some(p) => {
+                    sqlx::query(
+                        "INSERT INTO report_keypair (key_id, keypair, polid) VALUES(?, ?, ?)",
+                    )
+                    .bind(id)
+                    .bind(keypair_b64)
+                    .bind(p)
+                    .execute(&dbpool)
+                    .await?
+                    .last_insert_id();
+                }
+                None => {
+                    sqlx::query("INSERT INTO report_keypair (key_id, keypair) VALUES(?, ?)")
+                        .bind(id)
+                        .bind(keypair_b64)
+                        .execute(&dbpool)
+                        .await?
+                        .last_insert_id();
+                }
+            };
 
-    let query = match policy_id {
-        Some(p) => format!(
-            "INSERT INTO report_keypair (key_id, keypair, polid) VALUES(\'{}\', \'{}\', {:?})",
-            id, keypair_b64, p
-        ),
-        None => format!(
-            "INSERT INTO report_keypair (key_id, keypair) VALUES(\'{}\', \'{}\')",
-            id, keypair_b64
-        ),
-    };
+            Ok(last_insert_id)
+        }
+        "postgres" => {
+            let dbpool = get_postgres_dbpool().await?;
+            let last_insert_id = match policy_id {
+                Some(p) => {
+                    sqlx::query(
+                        "INSERT INTO report_keypair (key_id, keypair, p) VALUES($1, $2, $3) RETURNING id"
+                    )
+                         .bind(id)
+                         .bind(keypair_b64)
+                         .bind(p as i64)
+                         .execute(&dbpool)
+                         .await?;
+                }
+                None => {
+                    sqlx::query(
+                        "INSERT INTO report_keypair (key_id, keypair) VALUES($1, $2) RETURNING id",
+                    )
+                    .bind(id)
+                    .bind(keypair_b64)
+                    .execute(&dbpool)
+                    .await?;
+                }
+            };
 
-    sqlx::query(query.as_str()).execute(&dbpool).await?;
-
-    Ok(())
+            Ok(last_insert_id)
+        }
+        _ => {
+            error!("db::insert_report_keypair- error, this is not a mysql, sqlite, or postgres connection");
+            Err(anyhow!(
+                "db::insert_report_keypair- error, this is not a mysql, sqlite, or postgres connection"
+            ))
+        }
+    }
 }
 
 pub async fn get_report_keypair(id: &str) -> Result<Vec<u8>> {
-    let dbpool = get_dbpool().await?;
+    if !check_input(id.to_string()) {
+        error!("db::get_report_keypair- field sec did not pass sql injection check");
+        return Err(anyhow!(
+            "db::get_report_keypair- field sec did not pass sql injection check"
+        ));
+    }
 
-    let query = format!(
-        "SELECT keypair FROM report_keypair WHERE key_id = \'{}\'",
-        id
-    );
+    let db_type = env::var("KBS_DB_TYPE")
+        .expect("KBS_DB_TYPE not set")
+        .to_lowercase();
 
-    let keys_row = sqlx::query(query.as_str()).fetch_one(&dbpool).await?;
-
-    let kp = keys_row.try_get::<String, _>(0)?;
-    let kp_bytes = base64::decode(&kp)?;
-
-    Ok(kp_bytes)
+    match db_type.as_str() {
+        "mysql" | "sqlite" => {
+            let dbpool = get_mysql_dbpool().await?;
+            let key_row = sqlx::query("SELECT keypair FROM report_keypair WHERE key_id = ?")
+                .bind(id)
+                .fetch_one(&dbpool)
+                .await?;
+            let kp = key_row.try_get::<String, _>(0)?;
+            let kp_bytes = base64::decode(&kp)?;
+            Ok(kp_bytes)
+        }
+        "postgres" => {
+            let dbpool = get_postgres_dbpool().await?;
+            let key_row = sqlx::query("SELECT secret FROM secrets WHERE secret_id = $1")
+                .bind(id)
+                .fetch_one(&dbpool)
+                .await?;
+            let kp = key_row.try_get::<String, _>(0)?;
+            let kp_bytes = base64::decode(&kp)?;
+            Ok(kp_bytes)
+        }
+        _ => {
+            error!(
+                "db::get_keyset_ids- error, this is not a mysql, sqlite, or postgres connection"
+            );
+            Err(anyhow!(
+                "db::get_keyset_ids- error, this is not a mysql, sqlite, or postgres connection"
+            ))
+        }
+    }
 }
 
 pub async fn delete_report_keypair(key_id: &str) -> Result<()> {
-    let dbpool = get_dbpool().await?;
+    if !check_input(key_id.to_string()) {
+        error!(
+            "db::delete_report_keypair- fields passed to delete_secret did not pass sql injection check"
+        );
+        return Err(anyhow!(
+            "db::delete_report_keypair- fields passed to delete_keyset did not pass sql injection check"
+        ));
+    }
 
-    let query = format!("DELETE FROM report_keypair WHERE key_id = \'{}\'", key_id);
+    let db_type = env::var("KBS_DB_TYPE")
+        .expect("KBS_DB_TYPE not set")
+        .to_lowercase();
 
-    sqlx::query(query.as_str()).execute(&dbpool).await?;
-
-    Ok(())
+    match db_type.as_str() {
+        "mysql" | "sqlite" => {
+            let dbpool = get_mysql_dbpool().await?;
+            sqlx::query("DELETE from report_keypair WHERE key_id = ?")
+                .bind(key_id)
+                .execute(&dbpool)
+                .await?;
+            Ok(())
+        }
+        "postgres" => {
+            let dbpool = get_postgres_dbpool().await?;
+            sqlx::query("DELETE from report_keypair WHERE key_id = $1")
+                .bind(key_id)
+                .execute(&dbpool)
+                .await?;
+            Ok(())
+        }
+        _ => {
+            error!("db::delete_report_keypair- error, this is not a mysql, sqlite, or postgres connection");
+            Err(anyhow!(
+                "db::delete_report_keypair- error, this is not a mysql, sqlite, or postgres connection"
+            ))
+        }
+    }
 }
 
 pub async fn get_signing_keys_policy(key_id: &str) -> Result<Option<policy::Policy>> {
-    let dbpool = get_dbpool().await?;
+    if !check_input(key_id.to_string()) {
+        error!("db::get_signing_keys_policy- field sec did not pass sql injection check");
+        return Err(anyhow!(
+            "db::get_signing_keys_policy- field sec did not pass sql injection check"
+        ));
+    }
 
-    let query = format!(
-        "SELECT polid FROM report_keypair WHERE key_id = \'{}\' AND polid IS NOT NULL",
-        key_id
-    );
+    let db_type = env::var("KBS_DB_TYPE")
+        .expect("KBS_DB_TYPE not set")
+        .to_lowercase();
 
-    let policy_id_option = sqlx::query(query.as_str()).fetch_optional(&dbpool).await?;
-
-    match policy_id_option {
-        Some(p) => {
-            let pid = p.try_get::<i32, _>(0)? as u64;
-            Ok(Some(get_policy(pid).await?))
+    match db_type.as_str() {
+        "mysql" | "sqlite" => {
+            let dbpool = get_mysql_dbpool().await?;
+            let policy_id_option = sqlx::query(
+                "SELECT polid FROM report_keypair WHERE key_id = ? AND polid IS NOT NULL",
+            )
+            .bind(key_id)
+            .fetch_optional(&dbpool)
+            .await?;
+            match policy_id_option {
+                Some(p) => {
+                    let pid = p.try_get::<i64, _>(0)? as u64;
+                    Ok(Some(get_policy(pid).await?))
+                }
+                None => Ok(None),
+            }
         }
-        None => Ok(None),
+        "postgres" => {
+            let dbpool = get_postgres_dbpool().await?;
+            let policy_id_option = sqlx::query(
+                "SELECT polid FROM report_keypair WHERE key_id = $1 AND polid IS NOT NULL",
+            )
+            .bind(key_id)
+            .fetch_optional(&dbpool)
+            .await?;
+            match policy_id_option {
+                Some(p) => {
+                    let pid = p.try_get::<i64, _>(0)? as u64;
+                    Ok(Some(get_policy(pid).await?))
+                }
+                None => Ok(None),
+            }
+        }
+        _ => {
+            error!(
+                "db::get_keyset_ids- error, this is not a mysql, sqlite, or postgres connection"
+            );
+            Err(anyhow!(
+                "db::get_keyset_ids- error, this is not a mysql, sqlite, or postgres connection"
+            ))
+        }
     }
 }
 
@@ -379,6 +1121,47 @@ mod tests {
         assert_eq!(testconn.fw_build_id, resconn.fw_build_id);
         assert_eq!(testconn.launch_description, resconn.launch_description);
         let _dconid = aw!(delete_connection(tid.clone()))?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_check_input() -> anyhow::Result<()> {
+        let mut test_string = r"'1'='1'";
+        let mut ret = check_input(test_string.to_string());
+        assert_eq!(ret, false);
+
+        test_string = r"1 = 1";
+        ret = check_input(test_string.to_string());
+        assert_eq!(ret, false);
+
+        test_string = r"drop";
+        ret = check_input(test_string.to_string());
+        assert_eq!(ret, false);
+
+        test_string = r"select *";
+        ret = check_input(test_string.to_string());
+        assert_eq!(ret, false);
+
+        test_string = r"user";
+        ret = check_input(test_string.to_string());
+        assert_eq!(ret, false);
+
+        test_string = r"password";
+        ret = check_input(test_string.to_string());
+        assert_eq!(ret, false);
+
+        test_string = r"alter";
+        ret = check_input(test_string.to_string());
+        assert_eq!(ret, false);
+
+        test_string = r"delete";
+        ret = check_input(test_string.to_string());
+        assert_eq!(ret, false);
+
+        test_string = r"PuBT5e0dD21ZDoqdiBMNjWeKV2WhtcEOIdWeEsFwivw=";
+        ret = check_input(test_string.to_string());
+        assert_eq!(ret, true);
 
         Ok(())
     }
