@@ -535,53 +535,47 @@ pub async fn insert_keyset(ksetid: &str, kskeys: &[String], polid: Option<u32>) 
     match db_type.as_str() {
         "mysql" | "sqlite" => {
             let dbpool = get_mysql_dbpool().await?;
-            let last_insert_id = match polid {
+            match polid {
                 Some(p) => {
                     sqlx::query("INSERT INTO keysets (keysetid, kskeys, polid) VALUES(?, ?, ?)")
                         .bind(ksetid)
                         .bind(&kskeys_str)
                         .bind(p)
                         .execute(&dbpool)
-                        .await?
-                        .last_insert_id();
+                        .await?;
+                    Ok(())
                 }
                 None => {
                     sqlx::query("INSERT INTO keysets (keysetid, kskeys) VALUES(?, ?)")
                         .bind(ksetid)
                         .bind(&kskeys_str)
                         .execute(&dbpool)
-                        .await?
-                        .last_insert_id();
+                        .await?;
+                    Ok(())
                 }
-            };
-
-            Ok(last_insert_id)
+            }
         }
         "postgres" => {
             let dbpool = get_postgres_dbpool().await?;
-            let last_insert_id = match polid {
+            match polid {
                 Some(p) => {
-                    sqlx::query(
-                        "INSERT INTO keysets (keysetid, kskeys, polid) VALUES($1, $2, $3) RETURNING id"
-                    )
-                         .bind(ksetid)
-                         .bind(&kskeys_str)
-                         .bind(p)
-                         .execute(&dbpool)
-                         .await?;
+                    sqlx::query("INSERT INTO keysets (keysetid, kskeys, polid) VALUES($1, $2, $3)")
+                        .bind(ksetid)
+                        .bind(&kskeys_str)
+                        .bind(p)
+                        .execute(&dbpool)
+                        .await?;
+                    Ok(())
                 }
                 None => {
-                    sqlx::query(
-                        "INSERT INTO keysets (keysetid, kskeys) VALUES($1, $2) RETURNING id",
-                    )
-                    .bind(ksetid)
-                    .bind(&kskeys_str)
-                    .execute(&dbpool)
-                    .await?;
+                    sqlx::query("INSERT INTO keysets (keysetid, kskeys) VALUES($1, $2)")
+                        .bind(ksetid)
+                        .bind(&kskeys_str)
+                        .execute(&dbpool)
+                        .await?;
+                    Ok(())
                 }
-            };
-
-            Ok(last_insert_id)
+            }
         }
         _ => {
             error!("db::insert_keyset- error, this is not a mysql, sqlite, or postgres connection");
@@ -780,53 +774,49 @@ pub async fn insert_secret(secret_id: &str, secret: &str, policy_id: Option<u64>
     match db_type.as_str() {
         "mysql" | "sqlite" => {
             let dbpool = get_mysql_dbpool().await?;
-            let last_insert_id = match policy_id {
+            match policy_id {
                 Some(p) => {
                     sqlx::query("INSERT INTO secrets (secret_id, secret, polid ) VALUES(?, ?, ?)")
                         .bind(secret_id)
                         .bind(secret)
                         .bind(p)
                         .execute(&dbpool)
-                        .await?
-                        .last_insert_id();
+                        .await?;
+                    Ok(())
                 }
                 None => {
                     sqlx::query("INSERT INTO secrets (secret_id, secret) VALUES(?, ?)")
                         .bind(secret_id)
                         .bind(secret)
                         .execute(&dbpool)
-                        .await?
-                        .last_insert_id();
+                        .await?;
+                    Ok(())
                 }
-            };
-
-            Ok(last_insert_id)
+            }
         }
         "postgres" => {
             let dbpool = get_postgres_dbpool().await?;
-            let last_insert_id = match policy_id {
+            match policy_id {
                 Some(p) => {
                     sqlx::query(
-                        "INSERT INTO secrets (secret_id, secret, polid) VALUES($1, $2, $3) RETURNING id"
-                    )
-                         .bind(secret_id)
-                         .bind(&secret)
-                         .bind(p as i64)
-                         .execute(&dbpool)
-                         .await?;
-                }
-                None => {
-                    sqlx::query(
-                        "INSERT INTO keysets (secret_id, secret) VALUES($1, $2) RETURNING id",
+                        "INSERT INTO secrets (secret_id, secret, polid) VALUES($1, $2, $3)",
                     )
                     .bind(secret_id)
-                    .bind(secret)
+                    .bind(&secret)
+                    .bind(p as i64)
                     .execute(&dbpool)
                     .await?;
+                    Ok(())
                 }
-            };
-
-            Ok(last_insert_id)
+                None => {
+                    sqlx::query("INSERT INTO keysets (secret_id, secret) VALUES($1, $2)")
+                        .bind(secret_id)
+                        .bind(secret)
+                        .execute(&dbpool)
+                        .await?;
+                    Ok(())
+                }
+            }
         }
         _ => {
             error!("db::insert_secret- error, this is not a mysql, sqlite, or postgres connection");
@@ -895,7 +885,7 @@ pub async fn insert_report_keypair(id: &str, keypair: &[u8], policy_id: Option<u
     match db_type.as_str() {
         "mysql" | "sqlite" => {
             let dbpool = get_mysql_dbpool().await?;
-            let last_insert_id = match policy_id {
+            match policy_id {
                 Some(p) => {
                     sqlx::query(
                         "INSERT INTO report_keypair (key_id, keypair, polid) VALUES(?, ?, ?)",
@@ -904,46 +894,42 @@ pub async fn insert_report_keypair(id: &str, keypair: &[u8], policy_id: Option<u
                     .bind(keypair_b64)
                     .bind(p)
                     .execute(&dbpool)
-                    .await?
-                    .last_insert_id();
+                    .await?;
+                    Ok(())
                 }
                 None => {
                     sqlx::query("INSERT INTO report_keypair (key_id, keypair) VALUES(?, ?)")
                         .bind(id)
                         .bind(keypair_b64)
                         .execute(&dbpool)
-                        .await?
-                        .last_insert_id();
+                        .await?;
+                    Ok(())
                 }
-            };
-
-            Ok(last_insert_id)
+            }
         }
         "postgres" => {
             let dbpool = get_postgres_dbpool().await?;
-            let last_insert_id = match policy_id {
+            match policy_id {
                 Some(p) => {
                     sqlx::query(
-                        "INSERT INTO report_keypair (key_id, keypair, p) VALUES($1, $2, $3) RETURNING id"
-                    )
-                         .bind(id)
-                         .bind(keypair_b64)
-                         .bind(p as i64)
-                         .execute(&dbpool)
-                         .await?;
-                }
-                None => {
-                    sqlx::query(
-                        "INSERT INTO report_keypair (key_id, keypair) VALUES($1, $2) RETURNING id",
+                        "INSERT INTO report_keypair (key_id, keypair, p) VALUES($1, $2, $3)",
                     )
                     .bind(id)
                     .bind(keypair_b64)
+                    .bind(p as i64)
                     .execute(&dbpool)
                     .await?;
+                    Ok(())
                 }
-            };
-
-            Ok(last_insert_id)
+                None => {
+                    sqlx::query("INSERT INTO report_keypair (key_id, keypair) VALUES($1, $2)")
+                        .bind(id)
+                        .bind(keypair_b64)
+                        .execute(&dbpool)
+                        .await?;
+                    Ok(())
+                }
+            }
         }
         _ => {
             error!("db::insert_report_keypair- error, this is not a mysql, sqlite, or postgres connection");
