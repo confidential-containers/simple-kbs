@@ -12,9 +12,9 @@ use std::result::Result::Ok;
 use uuid::Uuid;
 
 use log::*;
-use regex::RegexSet;
+use regex::{Captures, Regex, RegexSet};
 use serde::{Deserialize, Serialize};
-use sqlx::any::AnyPoolOptions;
+use sqlx::any::{AnyKind, AnyPoolOptions};
 use sqlx::mysql::MySqlPoolOptions;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::postgres::PgRow;
@@ -188,171 +188,105 @@ pub async fn get_postgres_dbpool() -> Result<PgPool> {
     Ok(db_pool)
 }
 
-pub async fn insert_connection(connection: Connection) -> Result<Uuid> {
-    // Check strings in Connection struct for sql injection -- other types have built in checks
-    if !check_input(connection.launch_description.clone())
-        || !check_input(connection.fw_digest.clone())
-    {
-        error!("db::insert_connection- fields launch_description or fw_digest did not pass sql injection check");
-        return Err(anyhow!("db::insert_connection- fields launch_description or fw_digest did not pass sql injection check"));
+fn replace_binds(kind: AnyKind, sql: &str) -> String {
+    if kind != AnyKind::Postgres {
+        return sql.to_string();
     }
 
+    // Replace question marks by $1, $2, ...
+    let question_mark_re = Regex::new(r"\?").unwrap();
+    let mut counter = 0;
+    let result = question_mark_re.replace_all(sql, |_: &Captures| {
+        counter += 1;
+        format!("${}", counter)
+    });
+    result.to_string()
+}
+
+pub async fn insert_connection(connection: Connection) -> Result<Uuid> {
     let nwuuid = Uuid::new_v4();
     let uuidstr = nwuuid.as_hyphenated().to_string();
+
+    let dbpool = get_dbpool().await?;
 
     let db_type = env::var("KBS_DB_TYPE")
         .expect("KBS_DB_TYPE not set")
         .to_lowercase();
-    match db_type.as_str() {
-        "mysql" | "sqlite" => {
-            let dbpool = get_mysql_dbpool().await?;
-            sqlx::query("insert into conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, create_date) VALUES(?, ?, ?, ?, ?, ?, ?, NOW())")
-                .bind(uuidstr)
-                .bind(connection.policy)
-                .bind(connection.fw_api_major)
-                .bind(connection.fw_api_minor)
-                .bind(connection.fw_build_id)
-                .bind(&connection.launch_description)
-                .bind(&connection.fw_digest)
-                .execute(&dbpool)
-                .await?;
-            Ok(nwuuid)
-        }
-        "postgres" => {
-            let dbpool = get_postgres_dbpool().await?;
-            sqlx::query("insert into conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, create_date) VALUES($1, $2, $3, $4, $5, $6, $7, NOW())")
-                .bind(uuidstr)
-                .bind(connection.policy)
-                .bind(connection.fw_api_major)
-                .bind(connection.fw_api_minor)
-                .bind(connection.fw_build_id)
-                .bind(&connection.launch_description)
-                .bind(&connection.fw_digest)
-                .execute(&dbpool)
-                .await?;
-            Ok(nwuuid)
-        }
-        _ => {
-            error!(
-                "db::insert_connection- error, this is not a mysql, sqlite, or postgres connection"
-            );
-            Err(anyhow!(
-                "db::insert_connection- error, this is not a mysql, sqlite, or postgres connection"
-            ))
-        }
-    }
+    let query_str = "INSERT INTO conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, create_date) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())";
+    let new_query_str: String = if db_type == *"postgres" {
+        replace_binds(dbpool.any_kind(), query_str)
+    } else {
+        query_str.to_string()
+    };
+
+    sqlx::query(&new_query_str.to_string())
+        .bind(uuidstr)
+        .bind(connection.policy as i64)
+        .bind(connection.fw_api_major as i64)
+        .bind(connection.fw_api_minor as i64)
+        .bind(connection.fw_build_id as i64)
+        .bind(&connection.launch_description)
+        .bind(&connection.fw_digest)
+        .execute(&dbpool)
+        .await?;
+    Ok(nwuuid)
 }
 
 pub async fn get_connection(uuid: Uuid) -> Result<Connection> {
     let uuidstr = uuid.as_hyphenated().to_string();
 
-    if !check_input(uuidstr.clone()) {
-        error!("db::get_connection- field uuid did not pass sql injection check");
-        return Err(anyhow!(
-            "db::get_connection- field uuid did not pass sql injection check"
-        ));
-    }
+    let dbpool = get_dbpool().await?;
+
     let db_type = env::var("KBS_DB_TYPE")
         .expect("KBS_DB_TYPE not set")
         .to_lowercase();
+    let query_str = "SELECT policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest FROM conn_bundle WHERE id = ?";
+    let new_query_str: String = if db_type == *"postgres" {
+        replace_binds(dbpool.any_kind(), query_str)
+    } else {
+        query_str.to_string()
+    };
 
-    match db_type.as_str() {
-        "mysql" | "sqlite" => {
-            let dbpool = get_mysql_dbpool().await?;
-            let con_row =
-                sqlx::query("SELECT policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest FROM conn_bundle WHERE id = ?")
-                .bind(uuidstr)
-                .fetch_one(&dbpool)
-                .await?;
-            Ok(Connection {
-                policy: con_row.try_get::<i32, _>(0)? as u32,
-                fw_api_major: con_row.try_get::<i32, _>(1)? as u32,
-                fw_api_minor: con_row.try_get::<i32, _>(2)? as u32,
-                fw_build_id: con_row.try_get::<i32, _>(3)? as u32,
-                launch_description: con_row.try_get::<String, _>(4)?,
-                fw_digest: con_row.try_get::<String, _>(5)?,
-            })
-        }
-        "postgres" => {
-            let dbpool = get_postgres_dbpool().await?;
-            let con_row =
-                sqlx::query("SELECT policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest FROM conn_bundle WHERE id = $1")
-                .bind(uuidstr)
-                .fetch_one(&dbpool)
-                .await?;
-            Ok(Connection {
-                policy: con_row.try_get::<i32, _>(0)? as u32,
-                fw_api_major: con_row.try_get::<i32, _>(1)? as u32,
-                fw_api_minor: con_row.try_get::<i32, _>(2)? as u32,
-                fw_build_id: con_row.try_get::<i32, _>(3)? as u32,
-                launch_description: con_row.try_get::<String, _>(4)?,
-                fw_digest: con_row.try_get::<String, _>(5)?,
-            })
-        }
-        _ => {
-            error!(
-                "db::insert_connection- error, this is not a mysql, sqlite, or postgres connection"
-            );
-            Err(anyhow!(
-                "db::insert_connection- error, this is not a mysql, sqlite, or postgres connection"
-            ))
-        }
-    }
+    let con_row = sqlx::query(&new_query_str.to_string())
+        .bind(uuidstr)
+        .fetch_one(&dbpool)
+        .await?;
+    Ok(Connection {
+        policy: con_row.try_get::<i32, _>(0)? as u32,
+        fw_api_major: con_row.try_get::<i32, _>(1)? as u32,
+        fw_api_minor: con_row.try_get::<i32, _>(2)? as u32,
+        fw_build_id: con_row.try_get::<i32, _>(3)? as u32,
+        launch_description: con_row.try_get::<String, _>(4)?,
+        fw_digest: con_row.try_get::<String, _>(5)?,
+    })
 }
 
 pub async fn delete_connection(uuid: Uuid) -> Result<Uuid> {
     let uuidstr = uuid.as_hyphenated().to_string();
 
-    if !check_input(uuidstr.clone()) {
-        error!("db::get_connection- field uuid did not pass sql injection check");
-        return Err(anyhow!(
-            "db::get_connection- field uuid did not pass sql injection check"
-        ));
-    }
+    let dbpool = get_dbpool().await?;
+
     let db_type = env::var("KBS_DB_TYPE")
         .expect("KBS_DB_TYPE not set")
         .to_lowercase();
+    let query_str = "DELETE from conn_bundle WHERE id = ?";
+    let new_query_str: String = if db_type == *"postgres" {
+        replace_binds(dbpool.any_kind(), query_str)
+    } else {
+        query_str.to_string()
+    };
 
-    match db_type.as_str() {
-        "mysql" | "sqlite" => {
-            let dbpool = get_mysql_dbpool().await?;
-            sqlx::query("DELETE from conn_bundle WHERE id = ?")
-                .bind(uuidstr)
-                .execute(&dbpool)
-                .await?;
-            Ok(uuid)
-        }
-        "postgres" => {
-            let dbpool = get_postgres_dbpool().await?;
-            sqlx::query("DELETE from conn_bundle WHERE id = $1")
-                .bind(uuidstr)
-                .execute(&dbpool)
-                .await?;
-            Ok(uuid)
-        }
-        _ => {
-            error!(
-                "db::delete_connection- error, this is not a mysql, sqlite, or postgres connection"
-            );
-            Err(anyhow!(
-                "db::delete_connection- error, this is not a mysql, sqlite, or postgres connection"
-            ))
-        }
-    }
+    sqlx::query(&new_query_str.to_string())
+        .bind(uuidstr)
+        .execute(&dbpool)
+        .await?;
+    Ok(uuid)
 }
 
 pub async fn insert_policy(policy: &policy::Policy) -> Result<u64> {
     let allowed_digests_json = serde_json::to_string(&policy.allowed_digests)?;
     let allowed_policies_json = serde_json::to_string(&policy.allowed_policies)?;
     let allowed_build_ids_json = serde_json::to_string(&policy.allowed_build_ids)?;
-
-    if !check_input(allowed_digests_json.clone())
-        || !check_input(allowed_policies_json.clone())
-        || !check_input(allowed_build_ids_json.clone())
-    {
-        error!("db::insert_policy- json fields passed to insert_policy did not pass sql injection check");
-        return Err(anyhow!("db::insert_policy- json fields passed to insert_policy did not pass sql injection check"));
-    }
 
     let db_type = env::var("KBS_DB_TYPE")
         .expect("KBS_DB_TYPE not set")
