@@ -209,17 +209,10 @@ pub async fn insert_connection(connection: Connection) -> Result<Uuid> {
 
     let dbpool = get_dbpool().await?;
 
-    let db_type = env::var("KBS_DB_TYPE")
-        .expect("KBS_DB_TYPE not set")
-        .to_lowercase();
     let query_str = "INSERT INTO conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, create_date) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())";
-    let new_query_str: String = if db_type == *"postgres" {
-        replace_binds(dbpool.any_kind(), query_str)
-    } else {
-        query_str.to_string()
-    };
+    let new_query_str = replace_binds(dbpool.any_kind(), query_str);
 
-    sqlx::query(&new_query_str.to_string())
+    sqlx::query(&new_query_str)
         .bind(uuidstr)
         .bind(connection.policy as i64)
         .bind(connection.fw_api_major as i64)
@@ -237,17 +230,10 @@ pub async fn get_connection(uuid: Uuid) -> Result<Connection> {
 
     let dbpool = get_dbpool().await?;
 
-    let db_type = env::var("KBS_DB_TYPE")
-        .expect("KBS_DB_TYPE not set")
-        .to_lowercase();
     let query_str = "SELECT policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest FROM conn_bundle WHERE id = ?";
-    let new_query_str: String = if db_type == *"postgres" {
-        replace_binds(dbpool.any_kind(), query_str)
-    } else {
-        query_str.to_string()
-    };
+    let new_query_str = replace_binds(dbpool.any_kind(), query_str);
 
-    let con_row = sqlx::query(&new_query_str.to_string())
+    let con_row = sqlx::query(&new_query_str)
         .bind(uuidstr)
         .fetch_one(&dbpool)
         .await?;
@@ -266,17 +252,10 @@ pub async fn delete_connection(uuid: Uuid) -> Result<Uuid> {
 
     let dbpool = get_dbpool().await?;
 
-    let db_type = env::var("KBS_DB_TYPE")
-        .expect("KBS_DB_TYPE not set")
-        .to_lowercase();
     let query_str = "DELETE from conn_bundle WHERE id = ?";
-    let new_query_str: String = if db_type == *"postgres" {
-        replace_binds(dbpool.any_kind(), query_str)
-    } else {
-        query_str.to_string()
-    };
+    let new_query_str = replace_binds(dbpool.any_kind(), query_str);
 
-    sqlx::query(&new_query_str.to_string())
+    sqlx::query(&new_query_str)
         .bind(uuidstr)
         .execute(&dbpool)
         .await?;
