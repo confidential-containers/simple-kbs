@@ -160,7 +160,9 @@ pub async fn insert_policy(policy: &policy::Policy) -> Result<u64> {
             .last_insert_id();
         match last_insert_row {
             Some(p) => Ok(p as u64),
-            None => Ok(0),
+            None => Err(anyhow!(
+                "db::insert_policy- error, last_insert_id() returned None"
+            )),
         }
     } else {
         let new_query_str = replace_binds(dbpool.any_kind(), query_str);
