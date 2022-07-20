@@ -145,6 +145,7 @@ pub async fn insert_policy(policy: &policy::Policy) -> Result<u64> {
     let allowed_build_ids_json = serde_json::to_string(&policy.allowed_build_ids)?;
 
     let dbpool = get_dbpool().await?;
+    let query_str = "INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(?, ?, ?, ?, ?, NOW(), 1) RETURNING id";
 
     if dbpool.any_kind() == AnyKind::MySql {
         let new_query_str = "INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(?, ?, ?, ?, ?, NOW(), 1)";
@@ -162,7 +163,6 @@ pub async fn insert_policy(policy: &policy::Policy) -> Result<u64> {
             None => Ok(0),
         }
     } else {
-        let query_str = "INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(?, ?, ?, ?, ?, NOW(), 1) RETURNING id";
         let new_query_str = replace_binds(dbpool.any_kind(), query_str);
         let last_insert_row = sqlx::query(&new_query_str)
             .bind(allowed_digests_json)
