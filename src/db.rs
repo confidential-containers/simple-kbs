@@ -146,18 +146,34 @@ pub async fn insert_policy(policy: &policy::Policy) -> Result<u64> {
 
     let dbpool = get_dbpool().await?;
 
-    let query_str = "INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(?, ?, ?, ?, ?, NOW(), 1) RETURNING id";
-    let new_query_str = replace_binds(dbpool.any_kind(), query_str);
-    let last_insert_row = sqlx::query(&new_query_str)
-        .bind(allowed_digests_json)
-        .bind(allowed_policies_json)
-        .bind(policy.min_fw_api_major as i64)
-        .bind(policy.min_fw_api_minor as i64)
-        .bind(allowed_build_ids_json)
-        .fetch_one(&dbpool)
-        .await?;
-
-    Ok(last_insert_row.try_get::<i64, _>(0)? as u64)
+    if dbpool.any_kind() == AnyKind::MySql {
+        let new_query_str = "INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(?, ?, ?, ?, ?, NOW(), 1)";
+        let last_insert_row = sqlx::query(new_query_str)
+            .bind(allowed_digests_json)
+            .bind(allowed_policies_json)
+            .bind(policy.min_fw_api_major as i64)
+            .bind(policy.min_fw_api_minor as i64)
+            .bind(allowed_build_ids_json)
+            .execute(&dbpool)
+            .await?
+            .last_insert_id();
+        match last_insert_row {
+            Some(p) => Ok(p as u64),
+            None => Ok(0),
+        }
+    } else {
+        let query_str = "INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(?, ?, ?, ?, ?, NOW(), 1) RETURNING id";
+        let new_query_str = replace_binds(dbpool.any_kind(), query_str);
+        let last_insert_row = sqlx::query(&new_query_str)
+            .bind(allowed_digests_json)
+            .bind(allowed_policies_json)
+            .bind(policy.min_fw_api_major as i64)
+            .bind(policy.min_fw_api_minor as i64)
+            .bind(allowed_build_ids_json)
+            .fetch_one(&dbpool)
+            .await?;
+        Ok(last_insert_row.try_get::<i64, _>(0)? as u64)
+    }
 }
 
 pub async fn get_policy(pid: u64) -> Result<policy::Policy> {
