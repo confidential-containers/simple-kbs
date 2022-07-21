@@ -221,7 +221,7 @@ pub async fn get_secret_policy(sec: &str) -> Result<policy::Policy> {
         .bind(sec)
         .fetch_one(&dbpool)
         .await?;
-    let pol = pol_row.try_get::<i32, _>(0)? as u64;
+    let pol = pol_row.try_get::<i64, _>(0)? as u64;
     let secret_policy = get_policy(pol).await?;
     Ok(secret_policy)
 }
@@ -395,14 +395,13 @@ pub async fn get_signing_keys_policy(key_id: &str) -> Result<Option<policy::Poli
         .await?;
     match policy_id_option {
         Some(p) => {
-            let pid = p.try_get::<i32, _>(0)? as u64;
+            let pid = p.try_get::<i64, _>(0)? as u64;
             Ok(Some(get_policy(pid).await?))
         }
         None => Ok(None),
     }
 }
 
-// -----------------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
 
@@ -590,13 +589,6 @@ mod tests {
         let polid = aw!(insert_policy(&testpol))?;
 
         let mut tid = "man-moon-dog-face-in-the-banana-patch-ksp".to_string();
-
-        // let rng = SystemRandom::new();
-        // let pkcs8_bytes = signature::EcdsaKeyPair::generate_pkcs8(
-        //     &signature::ECDSA_P256_SHA256_ASN1_SIGNING,
-        //     &rng,
-        // )
-        // .unwrap();
 
         let pkcs8_dummy_bytes = [0xa5u8; 512];
         // First test with valid policy id
