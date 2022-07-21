@@ -198,14 +198,14 @@ pub async fn get_policy(pid: u64) -> Result<policy::Policy> {
     })
 }
 
-pub async fn delete_policy(pid: &u64) -> Result<()> {
+pub async fn delete_policy(pid: u64) -> Result<()> {
     let dbpool = get_dbpool().await?;
 
     let query_str = "DELETE from policy WHERE id = ?";
     let new_query_str = replace_binds(dbpool.any_kind(), query_str);
 
     sqlx::query(&new_query_str)
-        .bind(*pid as i64)
+        .bind(pid as i64)
         .execute(&dbpool)
         .await?;
     Ok(())
@@ -317,30 +317,15 @@ pub async fn get_secret(secret_id: &str) -> Result<request::Key> {
 
 pub async fn insert_secret(secret_id: &str, secret: &str, policy_id: Option<u64>) -> Result<()> {
     let dbpool = get_dbpool().await?;
-
-    match policy_id {
-        Some(p) => {
-            let query_str = "INSERT INTO secrets (secret_id, secret, polid ) VALUES(?, ?, ?)";
-            let new_query_str = replace_binds(dbpool.any_kind(), query_str);
-            sqlx::query(&new_query_str)
-                .bind(secret_id)
-                .bind(secret)
-                .bind(p as i64)
-                .execute(&dbpool)
-                .await?;
-            Ok(())
-        }
-        None => {
-            let query_str = "INSERT INTO secrets (secret_id, secret) VALUES(?, ?)";
-            let new_query_str = replace_binds(dbpool.any_kind(), query_str);
-            sqlx::query(&new_query_str)
-                .bind(secret_id)
-                .bind(secret)
-                .execute(&dbpool)
-                .await?;
-            Ok(())
-        }
-    }
+    let query_str = "INSERT INTO secrets (secret_id, secret, polid ) VALUES(?, ?, ?)";
+    let new_query_str = replace_binds(dbpool.any_kind(), query_str);
+    sqlx::query(&new_query_str)
+        .bind(secret_id)
+        .bind(secret)
+        .bind(policy_id.map(|p| p as i64))
+        .execute(&dbpool)
+        .await?;
+    Ok(())
 }
 
 pub async fn delete_secret(secret_id: &str) -> Result<()> {
@@ -356,35 +341,19 @@ pub async fn delete_secret(secret_id: &str) -> Result<()> {
     Ok(())
 }
 
-// ------------------------------------------------------------------------------------
-
 pub async fn insert_report_keypair(id: &str, keypair: &[u8], policy_id: Option<u64>) -> Result<()> {
     let keypair_b64 = base64::encode(&keypair);
-    let dbpool = get_dbpool().await?;
 
-    match policy_id {
-        Some(p) => {
-            let query_str = "INSERT INTO report_keypair (key_id, keypair, polid) VALUES(?, ?, ?)";
-            let new_query_str = replace_binds(dbpool.any_kind(), query_str);
-            sqlx::query(&new_query_str)
-                .bind(id)
-                .bind(&keypair_b64)
-                .bind(p as i64)
-                .execute(&dbpool)
-                .await?;
-            Ok(())
-        }
-        None => {
-            let query_str = "INSERT INTO report_keypair (key_id, keypair) VALUES(?, ?)";
-            let new_query_str = replace_binds(dbpool.any_kind(), query_str);
-            sqlx::query(&new_query_str)
-                .bind(id)
-                .bind(&keypair_b64)
-                .execute(&dbpool)
-                .await?;
-            Ok(())
-        }
-    }
+    let dbpool = get_dbpool().await?;
+    let query_str = "INSERT INTO report_keypair (key_id, keypair, polid ) VALUES(?, ?, ?)";
+    let new_query_str = replace_binds(dbpool.any_kind(), query_str);
+    sqlx::query(&new_query_str)
+        .bind(id)
+        .bind(&keypair_b64)
+        .bind(policy_id.map(|p| p as i64))
+        .execute(&dbpool)
+        .await?;
+    Ok(())
 }
 
 pub async fn get_report_keypair(id: &str) -> Result<Vec<u8>> {
@@ -438,7 +407,6 @@ pub async fn get_signing_keys_policy(key_id: &str) -> Result<Option<policy::Poli
 mod tests {
 
     use super::*;
-    use ring::{rand::SystemRandom, signature};
 
     macro_rules! aw {
         ($e:expr) => {
@@ -502,7 +470,7 @@ mod tests {
             );
         }
 
-        aw!(delete_policy(&polid))?;
+        aw!(delete_policy(polid))?;
         Ok(())
     }
 
@@ -539,7 +507,7 @@ mod tests {
         assert_eq!(testpol.allowed_build_ids[0], 0);
 
         aw!(delete_secret(&secid_uuid))?;
-        aw!(delete_policy(&tpid))?;
+        aw!(delete_policy(tpid))?;
         Ok(())
     }
 
@@ -547,8 +515,8 @@ mod tests {
     fn test_secrets() -> anyhow::Result<()> {
         let secid = Uuid::new_v4().as_hyphenated().to_string();
         let sec = Uuid::new_v4().as_hyphenated().to_string();
-        let polid = 0;
-        aw!(insert_secret(&secid, &sec, Option::<u64>::Some(polid)))?;
+        let polid = 0u64;
+        aw!(insert_secret(&secid, &sec, Some(polid)))?;
 
         let tkey = aw!(get_secret(&secid))?;
 
@@ -581,7 +549,7 @@ mod tests {
         ];
 
         let ksetid = Uuid::new_v4().as_hyphenated().to_string();
-        let polid: Option<u32> = Some(1);
+        let polid = Some(1u32);
         aw!(insert_keyset(&ksetid, &keys, polid))?;
 
         let keyset_ids = aw!(get_keyset_ids(&ksetid))?;
@@ -597,17 +565,12 @@ mod tests {
     fn test_get_report_keypair() -> anyhow::Result<()> {
         let tid = "man-moon-dog-face-in-the-banana-patch".to_string();
 
-        let rng = SystemRandom::new();
-        let pkcs8_bytes = signature::EcdsaKeyPair::generate_pkcs8(
-            &signature::ECDSA_P256_SHA256_ASN1_SIGNING,
-            &rng,
-        )
-        .unwrap();
+        let pkcs8_dummy_bytes = [0xa5u8; 512];
 
-        aw!(insert_report_keypair(&tid, pkcs8_bytes.as_ref(), None)).unwrap();
+        aw!(insert_report_keypair(&tid, &pkcs8_dummy_bytes, None)).unwrap();
 
         let keypair_vec = aw!(get_report_keypair(&tid)).unwrap();
-        assert_eq!(keypair_vec, pkcs8_bytes.as_ref());
+        assert_eq!(keypair_vec, &pkcs8_dummy_bytes);
 
         aw!(delete_report_keypair(&tid))?;
 
@@ -628,17 +591,18 @@ mod tests {
 
         let mut tid = "man-moon-dog-face-in-the-banana-patch-ksp".to_string();
 
-        let rng = SystemRandom::new();
-        let pkcs8_bytes = signature::EcdsaKeyPair::generate_pkcs8(
-            &signature::ECDSA_P256_SHA256_ASN1_SIGNING,
-            &rng,
-        )
-        .unwrap();
+        // let rng = SystemRandom::new();
+        // let pkcs8_bytes = signature::EcdsaKeyPair::generate_pkcs8(
+        //     &signature::ECDSA_P256_SHA256_ASN1_SIGNING,
+        //     &rng,
+        // )
+        // .unwrap();
 
+        let pkcs8_dummy_bytes = [0xa5u8; 512];
         // First test with valid policy id
         aw!(insert_report_keypair(
             &tid,
-            pkcs8_bytes.as_ref(),
+            &pkcs8_dummy_bytes,
             Option::Some(polid)
         ))
         .unwrap();
@@ -646,13 +610,13 @@ mod tests {
         let keypair_policy = aw!(get_signing_keys_policy(&tid))?;
         assert_eq!(keypair_policy, Option::Some(testpol));
         aw!(delete_report_keypair(&tid))?;
-        aw!(delete_policy(&polid))?;
+        aw!(delete_policy(polid))?;
 
         // Now test report_keypair without a policy
 
         tid = "the-quick-brown-cow-jumped-over-the-moon-no-policy".to_string();
 
-        aw!(insert_report_keypair(&tid, pkcs8_bytes.as_ref(), None))?;
+        aw!(insert_report_keypair(&tid, &pkcs8_dummy_bytes, None))?;
 
         let keypair_policy = aw!(get_signing_keys_policy(&tid))?;
         assert_eq!(keypair_policy, None);
