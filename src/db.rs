@@ -47,10 +47,14 @@ pub async fn get_dbpool() -> Result<AnyPool> {
     let db_pw = env::var("KBS_DB_PW").expect("KBS_DB_PW not set.");
     let data_base = env::var("KBS_DB").expect("KBS_DB not set");
 
-    let db_url = format!(
-        "{}://{}:{}@{}/{}",
-        db_type, user_name, db_pw, host_name, data_base
-    );
+    let db_url = if db_type == "sqlite" {
+        format!("{}://{}", db_type, data_base)
+    } else {
+        format!(
+            "{}://{}:{}@{}/{}",
+            db_type, user_name, db_pw, host_name, data_base
+        )
+    };
 
     let db_pool = AnyPoolOptions::new()
         .max_connections(1000)
@@ -86,7 +90,13 @@ pub async fn insert_connection(connection: Connection) -> Result<Uuid> {
 
     let dbpool = get_dbpool().await?;
 
-    let query_str = "INSERT INTO conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, create_date) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())";
+    let db_type = env::var("KBS_DB_TYPE").expect("KBS_DB_TYPE not set");
+    let query_str = if db_type == "sqlite" {
+        "INSERT INTO conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, create_date) VALUES (?, ?, ?, ?, ?, ?, ?, DATE('now'))"
+    } else {
+        "INSERT INTO conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, create_date) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())"
+    };
+
     let new_query_str = replace_binds(dbpool.any_kind(), query_str);
 
     sqlx::query(&new_query_str)
@@ -145,9 +155,16 @@ pub async fn insert_policy(policy: &policy::Policy) -> Result<u64> {
     let allowed_build_ids_json = serde_json::to_string(&policy.allowed_build_ids)?;
 
     let dbpool = get_dbpool().await?;
-    let mut query_str = String::from("INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(?, ?, ?, ?, ?, NOW(), 1)");
 
-    if dbpool.any_kind() == AnyKind::MySql {
+    let db_type = env::var("KBS_DB_TYPE").expect("KBS_DB_TYPE not set");
+    let mut query_str = if db_type == "sqlite" {
+        String::from("INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(?, ?, ?, ?, ?, DATE('now'), 1)")
+    } else {
+        String::from("INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(?, ?, ?, ?, ?, NOW(), 1)")
+    };
+    //let mut query_str = String::from("INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(?, ?, ?, ?, ?, NOW(), 1)");
+
+    if dbpool.any_kind() == AnyKind::MySql || dbpool.any_kind() == AnyKind::Sqlite {
         let last_insert_row = sqlx::query(&query_str)
             .bind(allowed_digests_json)
             .bind(allowed_policies_json)
