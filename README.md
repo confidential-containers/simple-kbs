@@ -66,6 +66,7 @@ KBS is connected to database via environment variables.
 * `KBS_DB_USER`
 * `KBS_DB_PW`
 * `KBS_DB`
+* `KBS_DB_TYPE`
 
 This KBS does not calculate the launch digest. The guest owner must calculate the launch digest ahead of time.
 The [sev-snp-measure](https://github.com/IBM/sev-snp-measure) tool can be used to calculate the launch digest of an SEV guest. For example:
@@ -86,3 +87,10 @@ Loosely based on [CCv0 SEV GOP script](https://github.com/confidential-container
 
 The [`tools/run_local_tests.sh`](tools/run_local_tests.sh) script creates a DB
 server container and runs the integration tests against it.
+# Simple Key Broker Server 
+
+`simple-kbs` is a self-contained Key Broker Server for pre-attestation.
+The code is currently being developed in the `staging` branch.
+
+## License
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fconfidential-containers%2Fsimple-kbs.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fconfidential-containers%2Fsimple-kbs?ref=badge_large)

@@ -88,7 +88,7 @@ impl KeyBrokerService for KeyBroker {
             .parse_requests(&r.secret_requests)
             .map_err(|e| Status::internal(format!("Bad secret request: {}", e)))?;
 
-        let policies = secret_request.policies();
+        let policies = secret_request.policies().await;
 
         // Validate connection against policies
         for p in policies {
@@ -111,6 +111,7 @@ impl KeyBrokerService for KeyBroker {
         // get secret(s)
         let secret_payload = &secret_request
             .payload(&connection)
+            .await
             .map_err(|e| Status::internal(format!("Cannot fulfill secret request: {}", e)))?;
 
         let (secret_header, secret_data) = package_secret(session_verified, secret_payload)
@@ -126,7 +127,7 @@ impl KeyBrokerService for KeyBroker {
 
 pub async fn start_service(socket: SocketAddr) -> Result<()> {
     let service = KeyBroker::default();
-    let _server = Server::builder()
+    Server::builder()
         .add_service(KeyBrokerServiceServer::new(service))
         .serve(socket)
         .await?;
