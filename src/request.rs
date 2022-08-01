@@ -10,7 +10,9 @@ use async_trait::async_trait;
 use log::*;
 use ring::{rand::SystemRandom, signature};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::result::Result::Ok;
 use uuid::Uuid;
 
@@ -20,6 +22,8 @@ use crate::policy;
 
 // GUID that marks the beginning of the secret table
 const SECRET_GUID: Uuid = uuid::uuid!("1e74f542-71dd-4d66-963e-ef4287ff173b");
+
+const RESOURCE_PATH_BASE: &str = "resources";
 
 // Struct representing the entire request
 pub struct SecretRequest {
@@ -44,6 +48,7 @@ impl SecretRequest {
                 "key" => Box::new(SecretKey { request: r.clone() }),
                 "report" => Box::new(SecretReport { request: r.clone() }),
                 "connection" => Box::new(SecretConnection { request: r.clone() }),
+                "resource" => Box::new(SecretResource { request: r.clone() }),
                 _ => return Err(anyhow!("Unknown Secret Type")),
             };
 
@@ -329,6 +334,57 @@ impl SecretType for SecretConnection {
     }
 }
 
+struct SecretResource {
+    request: RequestDetails,
+}
+
+#[async_trait]
+impl SecretType for SecretResource {
+    async fn payload(&self, db: &KbsDb, _connection: Connection) -> Result<Vec<u8>> {
+        // For now all resources must be in the top level of the
+        // resources directory.
+        let resource_path = db.get_resource_path(&self.request.id).await?;
+
+        let mut path = PathBuf::from(RESOURCE_PATH_BASE);
+        path.push(resource_path);
+
+        let resource_binary = std::fs::read(path.as_path())?;
+
+        match &self.request.format[..] {
+            "binary" => Ok(resource_binary),
+            "json" => {
+                let json_payload =
+                    json!({ self.request.id.clone(): base64::encode(resource_binary) });
+                Ok(bincode::serialize(&json_payload)?)
+            }
+            _ => Err(anyhow!("Unknown Secret Format")),
+        }
+    }
+
+    async fn policies(&self, db: &KbsDb) -> Vec<policy::Policy> {
+        match db.get_resource_policy(&self.request.id).await {
+            Ok(policy) => match policy {
+                Some(p) => vec![p],
+                None => {
+                    info!("No policy for resource: {}", &self.request.id);
+                    vec![]
+                }
+            },
+            Err(e) => {
+                error!(
+                    "Error getting policy for secret with id {}. Details: {}",
+                    &self.request.id, e
+                );
+                vec![]
+            }
+        }
+    }
+
+    fn guid(&self) -> &String {
+        &self.request.guid
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -465,6 +521,49 @@ mod tests {
         key.verify(&connection_bytes, &signature_bytes).unwrap();
 
         db.delete_report_keypair(&kid).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_resource() {
+        let db = KbsDb::new().await.unwrap();
+        let connection = Connection::default();
+
+        let guid = "2cf13667-ea72-4013-9dd6-155e89c5a28f".to_string();
+
+        let test_file_content = b"test file";
+        let resource_path = "test-file.txt".to_string();
+
+        let mut full_path = PathBuf::from(RESOURCE_PATH_BASE);
+        full_path.push(resource_path.clone());
+
+        std::fs::write(full_path.clone(), test_file_content).unwrap();
+
+        let resource_id = "id-unused".to_string();
+        let resource_type = "test".to_string();
+
+        db.insert_resource(&resource_type, &resource_id, &resource_path, None)
+            .await
+            .unwrap();
+
+        let request = RequestDetails {
+            guid: guid.clone(),
+            format: "binary".to_string(),
+            secret_type: "resource".to_string(),
+            id: resource_type.clone(),
+        };
+
+        let r = SecretResource { request };
+
+        // test policy
+        assert!(r.policies(&db).await.is_empty());
+
+        // get report payload
+        let payload = r.payload(&db, connection.clone()).await.unwrap();
+
+        assert_eq!(payload, test_file_content);
+
+        db.delete_resource(&resource_id).await.unwrap();
+        std::fs::remove_file(full_path).unwrap();
     }
 
     #[tokio::test]

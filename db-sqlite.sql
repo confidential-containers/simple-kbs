@@ -46,5 +46,14 @@ CREATE TABLE `report_keypair` (
 `polid` int(11) DEFAULT NULL,
 UNIQUE(`key_id`)
 );
+CREATE TABLE `resources` (
+`id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+`resource_id` varchar(1024) DEFAULT NULL,
+`resource_type` varchar(1024) DEFAULT NULL,
+`resource_path` varchar(1024) DEFAULT NULL,
+`polid` int(11) DEFAULT NULL,
+UNIQUE(`resource_id`)
+);
+
 DELETE FROM sqlite_sequence;
 COMMIT;
