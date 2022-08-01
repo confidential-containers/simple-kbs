@@ -130,6 +130,28 @@ CREATE TABLE report_keypair (
 -- Dumping data for table report_keypair
 --
 
+--
+-- Table structure for table resources
+--
+
+-- DROP TABLE IF EXISTS resources;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE resources (
+  id SERIAL NOT NULL,
+  resource_id varchar(1024) DEFAULT NULL,
+  resource_type varchar(1024) DEFAULT NULL,
+  resource_path varchar(1024) DEFAULT NULL,
+  polid BIGINT DEFAULT NULL,
+  PRIMARY KEY (id),
+  UNIQUE(resource_id)
+);
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table resources 
+--
+
 
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;

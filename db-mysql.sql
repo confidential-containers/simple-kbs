@@ -130,6 +130,28 @@ CREATE TABLE `report_keypair` (
 -- Dumping data for table `report_keypair`
 --
 
+--
+-- Table structure for table `resources`
+--
+
+DROP TABLE IF EXISTS `resources`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `resources` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `resource_id` varchar(1024) DEFAULT NULL,
+  `resource_type` varchar(1024) DEFAULT NULL,
+  `resource_path` varchar(1024) DEFAULT NULL,
+  `polid` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `resource_id` (`resource_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `resources`
+--
+
 
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;

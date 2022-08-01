@@ -422,6 +422,82 @@ impl KbsDb {
             None => Ok(None),
         }
     }
+
+    pub async fn get_resource_path(&self, resource_type: &str) -> Result<String> {
+        // for now just get the first resource of the given type
+        let query_str = "SELECT resource_path FROM resources WHERE resource_type = ? LIMIT 1";
+        let new_query_str = self.replace_binds(query_str);
+
+        let resource_row = sqlx::query(&new_query_str)
+            .bind(resource_type)
+            .fetch_one(&self.dbpool)
+            .await?;
+        let resource_path = resource_row.try_get::<String, _>(0)?;
+
+        Ok(resource_path)
+    }
+
+    pub async fn get_resource_policy(&self, resource_type: &str) -> Result<Option<policy::Policy>> {
+        let query_str =
+            "SELECT polid FROM resources WHERE resource_type = ? AND polid IS NOT NULL LIMIT 1";
+        let new_query_str = self.replace_binds(query_str);
+        let policy_id_option = sqlx::query(&new_query_str)
+            .bind(resource_type)
+            .fetch_optional(&self.dbpool)
+            .await?;
+        match policy_id_option {
+            Some(p) => {
+                let pid = p.try_get::<i64, _>(0)? as u64;
+                Ok(Some(self.get_policy(pid).await?))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub async fn insert_resource(
+        &self,
+        resource_type: &str,
+        resource_id: &str,
+        resource_path: &str,
+        policy_id: Option<u64>,
+    ) -> Result<()> {
+        match policy_id {
+            Some(p) => {
+                let query_str = "INSERT INTO resources (resource_id, resource_type, resource_path, polid ) VALUES(?, ?, ?, ?)";
+                let new_query_str = self.replace_binds(query_str);
+                sqlx::query(&new_query_str)
+                    .bind(resource_id)
+                    .bind(resource_type)
+                    .bind(resource_path)
+                    .bind(p as i64)
+                    .execute(&self.dbpool)
+                    .await?;
+                Ok(())
+            }
+            None => {
+                let query_str = "INSERT INTO resources (resource_id, resource_type, resource_path ) VALUES(?, ?, ?)";
+                let new_query_str = self.replace_binds(query_str);
+                sqlx::query(&new_query_str)
+                    .bind(resource_id)
+                    .bind(resource_type)
+                    .bind(resource_path)
+                    .execute(&self.dbpool)
+                    .await?;
+                Ok(())
+            }
+        }
+    }
+
+    pub async fn delete_resource(&self, resource_id: &str) -> Result<()> {
+        let query_str = "DELETE from resources WHERE resource_id = ?";
+        let new_query_str = self.replace_binds(query_str);
+
+        sqlx::query(&new_query_str)
+            .bind(resource_id)
+            .execute(&self.dbpool)
+            .await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
