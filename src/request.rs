@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::result::Result::Ok;
 use uuid::Uuid;
 
-use crate::db;
+use crate::db::{Connection, KbsDb};
 use crate::grpc::key_broker::RequestDetails;
 use crate::policy;
 
@@ -53,20 +53,20 @@ impl SecretRequest {
         Ok(())
     }
 
-    pub async fn policies(&self) -> Vec<policy::Policy> {
+    pub async fn policies(&self, db: &KbsDb) -> Vec<policy::Policy> {
         // include tenant default
         let mut policies = vec![policy::Policy::tenant_default().unwrap()];
         for s in &self.secrets {
-            policies.extend(s.policies().await)
+            policies.extend(s.policies(db).await)
         }
         policies
     }
 
-    pub async fn payload_table(&self, connection: &db::Connection) -> Result<Vec<u8>> {
+    pub async fn payload_table(&self, db: &KbsDb, connection: &Connection) -> Result<Vec<u8>> {
         let mut payload = vec![];
 
         for s in &self.secrets {
-            let secret_payload = s.payload(connection.clone()).await?;
+            let secret_payload = s.payload(db, connection.clone()).await?;
 
             payload.extend_from_slice(&Uuid::parse_str(s.guid()).unwrap().to_bytes_le());
             payload.extend_from_slice(
@@ -91,10 +91,10 @@ impl SecretRequest {
         Ok(secret_table)
     }
 
-    pub async fn payload_simple(&self, connection: &db::Connection) -> Result<Vec<u8>> {
+    pub async fn payload_simple(&self, db: &KbsDb, connection: &Connection) -> Result<Vec<u8>> {
         let mut payload = HashMap::new();
         for s in &self.secrets {
-            payload.insert(s.guid(), s.payload(connection.clone()).await?);
+            payload.insert(s.guid(), s.payload(db, connection.clone()).await?);
         }
         Ok(bincode::serialize(&payload)?)
     }
@@ -102,8 +102,8 @@ impl SecretRequest {
 
 #[async_trait]
 trait SecretType {
-    async fn payload(&self, connection: db::Connection) -> Result<Vec<u8>>;
-    async fn policies(&self) -> Vec<policy::Policy>;
+    async fn payload(&self, db: &KbsDb, connection: Connection) -> Result<Vec<u8>>;
+    async fn policies(&self, db: &KbsDb) -> Vec<policy::Policy>;
     fn guid(&self) -> &String;
 }
 
@@ -114,8 +114,8 @@ struct SecretKey {
 #[async_trait]
 impl SecretType for SecretKey {
     #[allow(unused_variables)]
-    async fn payload(&self, connection: db::Connection) -> Result<Vec<u8>> {
-        let key = db::get_secret(&self.request.id).await?;
+    async fn payload(&self, db: &KbsDb, connection: Connection) -> Result<Vec<u8>> {
+        let key = db.get_secret(&self.request.id).await?;
         Ok(match &self.request.format[..] {
             "binary" => key.into_bytes(),
             "json" => serde_json::to_string(&key).unwrap().into_bytes(),
@@ -123,8 +123,8 @@ impl SecretType for SecretKey {
         })
     }
 
-    async fn policies(&self) -> Vec<policy::Policy> {
-        match db::get_secret_policy(&self.request.id).await {
+    async fn policies(&self, db: &KbsDb) -> Vec<policy::Policy> {
+        match db.get_secret_policy(&self.request.id).await {
             Ok(policy) => vec![policy],
             Err(e) => {
                 error!(
@@ -160,12 +160,12 @@ struct SecretBundle {
 #[async_trait]
 impl SecretType for SecretBundle {
     #[allow(unused_variables)]
-    async fn payload(&self, connection: db::Connection) -> Result<Vec<u8>> {
+    async fn payload(&self, db: &KbsDb, connection: Connection) -> Result<Vec<u8>> {
         let mut bundle = HashMap::new();
 
-        let secrets = db::get_keyset_ids(&self.request.id).await?;
+        let secrets = db.get_keyset_ids(&self.request.id).await?;
         for s in secrets {
-            let k = db::get_secret(&s).await?;
+            let k = db.get_secret(&s).await?;
             bundle.insert(k.id, k.payload);
         }
         Ok(serde_json::to_string(&bundle)?.into_bytes())
@@ -174,10 +174,10 @@ impl SecretType for SecretBundle {
     // Policies are calculated before the measurement is validated.
     // Since the guest/client is not trusted at this point, errors are
     // not reported to it. Thus, this method does not return a result.
-    async fn policies(&self) -> Vec<policy::Policy> {
+    async fn policies(&self, db: &KbsDb) -> Vec<policy::Policy> {
         let mut policies = vec![];
 
-        match db::get_keyset_policy(&self.request.id).await {
+        match db.get_keyset_policy(&self.request.id).await {
             Ok(policy) => policies.push(policy),
             Err(e) => {
                 error!(
@@ -187,9 +187,9 @@ impl SecretType for SecretBundle {
             }
         }
 
-        if let Ok(secrets) = db::get_keyset_ids(&self.request.id).await {
+        if let Ok(secrets) = db.get_keyset_ids(&self.request.id).await {
             for s in secrets {
-                match db::get_secret_policy(&s).await {
+                match db.get_secret_policy(&s).await {
                     Ok(policy) => policies.push(policy),
                     Err(e) => {
                         error!(
@@ -228,10 +228,10 @@ struct Report {
 
 #[async_trait]
 impl SecretType for SecretReport {
-    async fn payload(&self, connection: db::Connection) -> Result<Vec<u8>> {
+    async fn payload(&self, db: &KbsDb, connection: Connection) -> Result<Vec<u8>> {
         let rng = SystemRandom::new();
 
-        let key_pair_pkcs8 = db::get_report_keypair(&self.request.id).await?;
+        let key_pair_pkcs8 = db.get_report_keypair(&self.request.id).await?;
         let key_pair = signature::EcdsaKeyPair::from_pkcs8(
             &signature::ECDSA_P256_SHA256_ASN1_SIGNING,
             &key_pair_pkcs8,
@@ -253,8 +253,8 @@ impl SecretType for SecretReport {
         Ok(serde_json::to_vec(&report)?)
     }
 
-    async fn policies(&self) -> Vec<policy::Policy> {
-        match db::get_signing_keys_policy(&self.request.id).await {
+    async fn policies(&self, db: &KbsDb) -> Vec<policy::Policy> {
+        match db.get_signing_keys_policy(&self.request.id).await {
             Ok(policy) => match policy {
                 Some(p) => vec![p],
                 None => vec![],
@@ -286,8 +286,8 @@ struct ConnectionOutput {
 
 #[async_trait]
 impl SecretType for SecretConnection {
-    async fn payload(&self, connection: db::Connection) -> Result<Vec<u8>> {
-        let (client_id, key) = db::insert_connection(connection).await?;
+    async fn payload(&self, db: &KbsDb, connection: Connection) -> Result<Vec<u8>> {
+        let (client_id, key) = db.insert_connection(connection).await?;
         let output = ConnectionOutput { client_id, key };
 
         Ok(serde_json::to_vec(&output)?)
@@ -297,7 +297,7 @@ impl SecretType for SecretConnection {
     // have their policies validated against the initial
     // parameters of the connection. Only the default policy
     // must be met to get a connection.
-    async fn policies(&self) -> Vec<policy::Policy> {
+    async fn policies(&self, _db: &KbsDb) -> Vec<policy::Policy> {
         vec![]
     }
 
@@ -309,15 +309,15 @@ impl SecretType for SecretConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db;
     use crate::grpc::key_broker::RequestDetails;
     use ring::signature::KeyPair;
 
     #[tokio::test]
     async fn test_secret_key() {
+        let db = KbsDb::new().await.unwrap();
         let secret_id = Uuid::new_v4().as_hyphenated().to_string();
         let guid = "2cf13667-ea72-4013-9dd6-155e89c5a28f".to_string();
-        let connection = db::Connection::default();
+        let connection = Connection::default();
         let request = RequestDetails {
             guid: guid.clone(),
             format: "binary".to_string(),
@@ -330,24 +330,28 @@ mod tests {
 
         let secret_bytes = base64::decode(&secret_value).unwrap();
 
-        db::insert_secret(&secret_id, &secret_value, None)
+        db.insert_secret(&secret_id, &secret_value, None)
             .await
             .unwrap();
 
         let secret_key = SecretKey { request };
-        assert!(secret_key.policies().await.is_empty());
+        assert!(secret_key.policies(&db).await.is_empty());
         assert_eq!(secret_key.guid(), &guid);
-        assert_eq!(secret_bytes, secret_key.payload(connection).await.unwrap());
+        assert_eq!(
+            secret_bytes,
+            secret_key.payload(&db, connection).await.unwrap()
+        );
 
-        db::delete_secret(&secret_id).await.unwrap();
+        db.delete_secret(&secret_id).await.unwrap();
     }
 
     #[tokio::test]
     async fn test_secret_bundle() {
+        let db = KbsDb::new().await.unwrap();
         let secret_id = Uuid::new_v4().as_hyphenated().to_string();
         let bundle_id = Uuid::new_v4().as_hyphenated().to_string();
         let guid = "1ee27366-0c87-43a6-af48-28543eaf7cb0".to_string();
-        let connection = db::Connection::default();
+        let connection = Connection::default();
         let request = RequestDetails {
             guid: guid.clone(),
             format: "json".to_string(),
@@ -358,31 +362,33 @@ mod tests {
         let secret = "test secret";
         let secret_value = base64::encode(secret);
 
-        db::insert_secret(&secret_id, &secret_value, None)
+        db.insert_secret(&secret_id, &secret_value, None)
             .await
             .unwrap();
-        db::insert_keyset(&bundle_id, &[secret_id.clone()], None)
+        db.insert_keyset(&bundle_id, &[secret_id.clone()], None)
             .await
             .unwrap();
 
         let secret_bundle = SecretBundle { request };
-        assert!(secret_bundle.policies().await.is_empty());
+        assert!(secret_bundle.policies(&db).await.is_empty());
         assert_eq!(secret_bundle.guid(), &guid);
         let mut expected_payload = HashMap::new();
         expected_payload.insert(&secret_id, &secret_value);
         assert_eq!(
-            secret_bundle.payload(connection).await.unwrap(),
+            secret_bundle.payload(&db, connection).await.unwrap(),
             serde_json::to_string(&expected_payload)
                 .unwrap()
                 .into_bytes()
         );
 
-        db::delete_keyset(&bundle_id).await.unwrap();
-        db::delete_secret(&secret_id).await.unwrap();
+        db.delete_keyset(&bundle_id).await.unwrap();
+        db.delete_secret(&secret_id).await.unwrap();
     }
 
     #[tokio::test]
     async fn test_report() {
+        let db = KbsDb::new().await.unwrap();
+
         // setup test state
         let guid = "2cf13667-ea72-4013-9dd6-155e89c5a28f".to_string();
         let kid = "test-keypair".to_string();
@@ -400,11 +406,11 @@ mod tests {
         .unwrap();
 
         let public_key = key_pair.public_key().as_ref();
-        db::insert_report_keypair(&kid, pkcs8_bytes.as_ref(), None)
+        db.insert_report_keypair(&kid, pkcs8_bytes.as_ref(), None)
             .await
             .unwrap();
 
-        let connection = db::Connection::default();
+        let connection = Connection::default();
 
         // create secret request
         let request = RequestDetails {
@@ -417,14 +423,14 @@ mod tests {
         let r = SecretReport { request };
 
         // test policy
-        assert!(r.policies().await.is_empty());
+        assert!(r.policies(&db).await.is_empty());
 
         // get report payload
-        let payload = r.payload(connection.clone()).await.unwrap();
+        let payload = r.payload(&db, connection.clone()).await.unwrap();
         let report: Report = serde_json::from_slice(&payload).unwrap();
 
         // make sure the connection in the report matches
-        let conn: db::Connection = serde_json::from_str(&report.connection).unwrap();
+        let conn: Connection = serde_json::from_str(&report.connection).unwrap();
         assert_eq!(conn.launch_description, connection.launch_description);
 
         // verify report signature
@@ -435,14 +441,15 @@ mod tests {
 
         key.verify(&connection_bytes, &signature_bytes).unwrap();
 
-        db::delete_report_keypair(&kid).await.unwrap();
+        db.delete_report_keypair(&kid).await.unwrap();
     }
 
     #[tokio::test]
     async fn test_request_parsing() {
+        let db = KbsDb::new().await.unwrap();
         let secret_id = Uuid::new_v4().as_hyphenated().to_string();
         let guid = "2cf13667-ea72-4013-9dd6-155e89c5a28f".to_string();
-        let connection = db::Connection::default();
+        let connection = Connection::default();
         let request = RequestDetails {
             guid: guid.clone(),
             format: "binary".to_string(),
@@ -456,20 +463,23 @@ mod tests {
         // this length is hardcoded in the struct below
         assert_eq!(secret_bytes.len(), 11);
 
-        db::insert_secret(&secret_id, &secret_value, None)
+        db.insert_secret(&secret_id, &secret_value, None)
             .await
             .unwrap();
 
         let requests = vec![request];
         let mut secret_request = SecretRequest::new();
         secret_request.parse_requests(&requests).unwrap();
-        let policies = secret_request.policies().await;
+        let policies = secret_request.policies(&db).await;
 
         let expected_policy = policy::Policy::tenant_default().unwrap();
         assert_eq!(policies.len(), 1);
         assert_eq!(policies[0], expected_policy);
 
-        let payload = secret_request.payload_table(&connection).await.unwrap();
+        let payload = secret_request
+            .payload_table(&db, &connection)
+            .await
+            .unwrap();
 
         #[repr(C)]
         #[derive(Serialize)]
@@ -494,6 +504,6 @@ mod tests {
         let expected_payload_binary = bincode::serialize(&expected_payload).unwrap();
         assert_eq!(expected_payload_binary, payload);
 
-        db::delete_secret(&secret_id).await.unwrap();
+        db.delete_secret(&secret_id).await.unwrap();
     }
 }
