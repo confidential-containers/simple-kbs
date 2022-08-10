@@ -15,7 +15,7 @@ use uuid::Uuid;
 extern crate lazy_static;
 
 use crate::crypto;
-use crate::db;
+use crate::db::{Connection, KbsDb};
 use crate::request;
 use crate::sev_tools::{generate_launch_bundle, package_secret, verify_measurement};
 
@@ -36,8 +36,9 @@ pub mod key_broker {
     tonic::include_proto!("keybroker");
 }
 
-#[derive(Debug, Default)]
-pub struct KeyBroker {}
+pub struct KeyBroker {
+    db: KbsDb,
+}
 
 #[tonic::async_trait]
 impl KeyBrokerService for KeyBroker {
@@ -77,7 +78,7 @@ impl KeyBrokerService for KeyBroker {
             .map_err(|e| Status::internal(format!("Malformed Launch ID: {}", e)))?;
 
         // keep track of the connection
-        let connection = db::Connection {
+        let connection = Connection {
             policy: r.policy,
             fw_api_major: r.api_major,
             fw_api_minor: r.api_minor,
@@ -92,7 +93,7 @@ impl KeyBrokerService for KeyBroker {
             .parse_requests(&r.secret_requests)
             .map_err(|e| Status::internal(format!("Bad secret request: {}", e)))?;
 
-        let policies = secret_request.policies().await;
+        let policies = secret_request.policies(&self.db).await;
 
         // Validate connection against policies
         for p in policies {
@@ -114,7 +115,7 @@ impl KeyBrokerService for KeyBroker {
 
         // get secret(s)
         let secret_payload = &secret_request
-            .payload_table(&connection)
+            .payload_table(&self.db, &connection)
             .await
             .map_err(|e| Status::internal(format!("Cannot fulfill secret request: {}", e)))?;
 
@@ -136,7 +137,9 @@ impl KeyBrokerService for KeyBroker {
         let client_id = Uuid::parse_str(&r.client_id)
             .map_err(|e| Status::internal(format!("Malformed Client ID: {}", e)))?;
 
-        let (connection, key) = db::get_connection(client_id)
+        let (connection, key) = self
+            .db
+            .get_connection(client_id)
             .await
             .map_err(|e| Status::internal(format!("Connection not found: {}", e)))?;
 
@@ -146,7 +149,7 @@ impl KeyBrokerService for KeyBroker {
             .parse_requests(&r.secret_requests)
             .map_err(|e| Status::internal(format!("Bad secret request: {}", e)))?;
 
-        let policies = secret_request.policies().await;
+        let policies = secret_request.policies(&self.db).await;
 
         // Validate connection against policies
         for p in policies {
@@ -159,7 +162,7 @@ impl KeyBrokerService for KeyBroker {
         );
 
         let secret_payload = &secret_request
-            .payload_simple(&connection)
+            .payload_simple(&self.db, &connection)
             .await
             .map_err(|e| Status::internal(format!("Cannot fulfill secret request: {}", e)))?;
 
@@ -174,7 +177,9 @@ impl KeyBrokerService for KeyBroker {
 }
 
 pub async fn start_service(socket: SocketAddr) -> Result<()> {
-    let service = KeyBroker::default();
+    let service = KeyBroker {
+        db: KbsDb::new().await?,
+    };
     Server::builder()
         .add_service(KeyBrokerServiceServer::new(service))
         .serve(socket)
