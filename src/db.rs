@@ -49,11 +49,21 @@ pub struct KbsDb {
 
 impl KbsDb {
     pub async fn new() -> Result<Self> {
-        let db_type = env::var("KBS_DB_TYPE").expect("KBS_DB_TYPE not set");
-        let host_name = env::var("KBS_DB_HOST").expect("KBS_DB_HOST not set");
-        let user_name = env::var("KBS_DB_USER").expect("KBS_DB_USER not set.");
-        let db_pw = env::var("KBS_DB_PW").expect("KBS_DB_PW not set.");
-        let data_base = env::var("KBS_DB").expect("KBS_DB not set");
+        let db_type = env::var("KBS_DB_TYPE")
+            .map_err(|e| anyhow!("KbsDb::new() - env var KBS_DB_TYPE parse error = {}", e))?;
+        let host_name = env::var("KBS_DB_HOST")
+            .map_err(|e| anyhow!("KbsDb::new() - env var KBS_DB_HOST parse error = {}", e))?;
+        let user_name = env::var("KBS_DB_USER")
+            .map_err(|e| anyhow!("KbsDb::new() - env var KBS_DB_USER parse error = {}", e))?;
+        let db_pw = env::var("KBS_DB_PW")
+            .map_err(|e| anyhow!("KbsDb::new() - env var KBS_DB_PW parse error = {}", e))?;
+        let data_base = env::var("KBS_DB")
+            .map_err(|e| anyhow!("KbsDb::new() - env var KBS_DB parse error = {}", e))?;
+
+        let max_conns = match env::var("KBS_DB_MAX_CONNS") {
+            Ok(mc) => mc.parse::<u32>()?,
+            Err(_e) => 1000u32,
+        };
 
         let db_url = if db_type == "sqlite" {
             format!("{}://{}", db_type, data_base)
@@ -65,7 +75,7 @@ impl KbsDb {
         };
 
         let dbpool = AnyPoolOptions::new()
-            .max_connections(1000)
+            .max_connections(max_conns)
             .connect(&db_url)
             .await
             .map_err(|e| {
@@ -99,8 +109,7 @@ impl KbsDb {
         let key_bytes = rand::thread_rng().gen::<[u8; CONNECTION_KEY_LENGTH]>();
         let key_b64 = base64::encode(key_bytes);
 
-        let db_type = env::var("KBS_DB_TYPE").expect("KBS_DB_TYPE not set");
-        let query_str = if db_type == "sqlite" {
+        let query_str = if self.dbpool.any_kind() == AnyKind::Sqlite {
             "INSERT INTO conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, symkey, create_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE('now'))"
         } else {
             "INSERT INTO conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, symkey, create_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())"
@@ -163,8 +172,7 @@ impl KbsDb {
         let allowed_policies_json = serde_json::to_string(&policy.allowed_policies)?;
         let allowed_build_ids_json = serde_json::to_string(&policy.allowed_build_ids)?;
 
-        let db_type = env::var("KBS_DB_TYPE").expect("KBS_DB_TYPE not set");
-        let mut query_str = if db_type == "sqlite" {
+        let mut query_str = if self.dbpool.any_kind() == AnyKind::Sqlite {
             String::from("INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(?, ?, ?, ?, ?, DATE('now'), 1)")
         } else {
             String::from("INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(?, ?, ?, ?, ?, NOW(), 1)")
@@ -230,7 +238,7 @@ impl KbsDb {
         Ok(())
     }
 
-    pub async fn get_secret_policy(&self, sec: &str) -> Result<policy::Policy> {
+    pub async fn get_secret_policy(&self, sec: &str) -> Result<Option<policy::Policy>> {
         let query_str = "SELECT polid FROM secrets WHERE secret_id = ?";
         let new_query_str = self.replace_binds(query_str);
 
@@ -238,9 +246,10 @@ impl KbsDb {
             .bind(sec)
             .fetch_one(&self.dbpool)
             .await?;
-        let pol = pol_row.try_get::<i64, _>(0)? as u64;
-        let secret_policy = self.get_policy(pol).await?;
-        Ok(secret_policy)
+        match pol_row.try_get::<i64, _>(0) {
+            Ok(pid) => Ok(Some(self.get_policy(pid as u64).await?)),
+            Err(_e) => Ok(None),
+        }
     }
 
     pub async fn insert_keyset(
@@ -287,17 +296,18 @@ impl KbsDb {
         Ok(())
     }
 
-    pub async fn get_keyset_policy(&self, keysetid: &str) -> Result<policy::Policy> {
+    pub async fn get_keyset_policy(&self, keysetid: &str) -> Result<Option<policy::Policy>> {
         let query_str = "SELECT polid FROM keysets WHERE keysetid = ?";
         let new_query_str = self.replace_binds(query_str);
-
         let pol_row = sqlx::query(&new_query_str)
             .bind(keysetid)
             .fetch_one(&self.dbpool)
             .await?;
-        let pol = pol_row.try_get::<i64, _>(0)? as u64;
-        let secret_policy = self.get_policy(pol).await?;
-        Ok(secret_policy)
+
+        match pol_row.try_get::<i64, _>(0) {
+            Ok(pid) => Ok(Some(self.get_policy(pid as u64).await?)),
+            Err(_e) => Ok(None),
+        }
     }
 
     pub async fn get_keyset_ids(&self, keysetid: &str) -> Result<Vec<String>> {
@@ -308,7 +318,7 @@ impl KbsDb {
             .bind(keysetid)
             .fetch_one(&self.dbpool)
             .await?;
-        let rks: Vec<String> = serde_json::from_str(&keyset_row.try_get::<String, _>(0)?).unwrap();
+        let rks: Vec<String> = serde_json::from_str(&keyset_row.try_get::<String, _>(0)?)?;
         Ok(rks)
     }
 
@@ -426,7 +436,7 @@ mod tests {
 
         let (tid, key) = db.insert_connection(testconn.clone()).await?;
 
-        let (resconn, reskey) = db.get_connection(tid.clone()).await?;
+        let (resconn, reskey) = db.get_connection(tid).await?;
 
         assert_eq!(key, reskey);
         assert_eq!(testconn.policy, resconn.policy);
@@ -434,7 +444,7 @@ mod tests {
         assert_eq!(testconn.fw_api_minor, resconn.fw_api_minor);
         assert_eq!(testconn.fw_build_id, resconn.fw_build_id);
         assert_eq!(testconn.launch_description, resconn.launch_description);
-        let _dconid = db.delete_connection(tid.clone()).await?;
+        let _dconid = db.delete_connection(tid).await?;
 
         Ok(())
     }
@@ -506,8 +516,7 @@ mod tests {
         db.insert_secret(&secid_uuid, &sec_uuid, Option::Some(tpid))
             .await?;
 
-        let testpol = db.get_secret_policy(&secid_uuid).await?;
-
+        let testpol = db.get_secret_policy(&secid_uuid).await?.unwrap();
         assert_eq!(
             testpol.allowed_digests[0],
             "PuBT5e0dD21ZDoqdiBMNjWeKV2WhtcEOIdWeEsFwivw="
@@ -583,10 +592,9 @@ mod tests {
         let pkcs8_dummy_bytes = [0xa5u8; 512];
 
         db.insert_report_keypair(&tid, &pkcs8_dummy_bytes, None)
-            .await
-            .unwrap();
+            .await?;
 
-        let keypair_vec = db.get_report_keypair(&tid).await.unwrap();
+        let keypair_vec = db.get_report_keypair(&tid).await?;
         assert_eq!(keypair_vec, &pkcs8_dummy_bytes);
 
         db.delete_report_keypair(&tid).await?;
@@ -614,8 +622,7 @@ mod tests {
         // First test with valid policy id
 
         db.insert_report_keypair(&tid, &pkcs8_dummy_bytes, Option::Some(polid))
-            .await
-            .unwrap();
+            .await?;
         let keypair_policy = db.get_signing_keys_policy(&tid).await?;
         assert_eq!(keypair_policy, Option::Some(testpol));
         db.delete_report_keypair(&tid).await?;
@@ -643,6 +650,51 @@ mod tests {
             let res = db.get_secret(&secid).await;
             assert!(res.is_err());
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_secret_null_policy() -> anyhow::Result<()> {
+        let db = KbsDb::new().await?;
+        let sec_id = "super-secret-id";
+        let sec = "super-secret";
+
+        db.insert_secret(sec_id, sec, None).await?;
+        let null_pol = db.get_secret_policy(sec_id).await?;
+        assert_eq!(null_pol, None);
+        db.delete_secret(sec_id).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_keyset_null_policy() -> anyhow::Result<()> {
+        let db = KbsDb::new().await?;
+
+        let keys: Vec<String> = vec![
+            "RGlyZSBXb2xmCg==".to_string(),
+            "VGhlIFJhY2UgaXMgT24K".into(),
+            "T2ggQmFiZSwgSXQgQWluJ3QgTm8gTGllCg==".into(),
+            "SXQgTXVzdCBIYXZlIEJlZW4gdGhlIFJvc2VzCg==".into(),
+            "RGFyayBIb2xsb3cK".into(),
+            "Q2hpbmEgRG9sbAo=".into(),
+            "QmVlbiBBbGwgQXJvdW5kIFRoaXMgV29ybGQK".into(),
+            "TW9ua2V5IGFuZCB0aGUgRW5naW5lZXIK".into(),
+            "SmFjay1BLVJvZQo=".into(),
+            "RGVlcCBFbGVtIEJsdWVzCg==".into(),
+            "Q2Fzc2lkeQo=".into(),
+            "VG8gTGF5IE1lIERvd24K".into(),
+            "Um9zYWxpZSBNY0ZhbGwK".into(),
+            "T24gdGhlIFJvYWQgQWdhaW4K".into(),
+            "QmlyZCBTb25nCg==".into(),
+            "UmlwcGxlCg==".into(),
+        ];
+
+        let ksetid = Uuid::new_v4().as_hyphenated().to_string();
+        let polid = None;
+        db.insert_keyset(&ksetid, &keys, polid).await?;
+        let null_pol = db.get_keyset_policy(&ksetid).await?;
+        assert_eq!(null_pol, None);
+        db.delete_keyset(&ksetid).await?;
         Ok(())
     }
 }
