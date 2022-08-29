@@ -125,7 +125,16 @@ impl SecretType for SecretKey {
 
     async fn policies(&self, db: &KbsDb) -> Vec<policy::Policy> {
         match db.get_secret_policy(&self.request.id).await {
-            Ok(policy) => vec![policy],
+            Ok(popt) => match popt {
+                Some(policy) => vec![policy],
+                None => {
+                    info!(
+                        "SecretKey::request::policies - there is no policy for {}",
+                        &self.request.id
+                    );
+                    vec![]
+                }
+            },
             Err(e) => {
                 error!(
                     "Error getting policy for secret with id {}. Details: {}",
@@ -178,7 +187,14 @@ impl SecretType for SecretBundle {
         let mut policies = vec![];
 
         match db.get_keyset_policy(&self.request.id).await {
-            Ok(policy) => policies.push(policy),
+            Ok(popt) => {
+                match popt {
+                    Some(policy) => policies.push(policy),
+                    None => {
+                        info!("SecretBundle::request::policies - there is no policy for request.id {}", &self.request.id);
+                    }
+                }
+            }
             Err(e) => {
                 error!(
                     "Error getting policy for keyset with id {}. Details: {}",
@@ -190,7 +206,14 @@ impl SecretType for SecretBundle {
         if let Ok(secrets) = db.get_keyset_ids(&self.request.id).await {
             for s in secrets {
                 match db.get_secret_policy(&s).await {
-                    Ok(policy) => policies.push(policy),
+                    Ok(popt) => {
+                        match popt {
+                            Some(policy) => policies.push(policy),
+                            None => {
+                                info!("SecretBundle::request::policies - there is no policy id for {}", s);
+                            }
+                        }
+                    }
                     Err(e) => {
                         error!(
                             "Error getting policy for secret with id {}. Details: {}",

@@ -6,7 +6,7 @@ echo "+ Running: cargo fmt"
 cargo fmt --all -- --check
 
 echo "+ Running: cargo clippy"
-cargo clippy -- -D warnings
+cargo clippy --all-targets --all-features -- -D warnings -A clippy::derive_partial_eq_without_eq
 
 SIMPLE_KBS_DIR="$(dirname $0)/.."
 
@@ -85,22 +85,3 @@ cargo test
 echo "+ Stopping kbs-db-postgres DB server container..."
 docker stop kbs-db-postgres
 
-echo "+ Updating exports for sqlite testing..."
-
-
-export KBS_DB_TYPE=sqlite
-export KBS_DB_HOST=localhost
-export KBS_DB_USER=${USER}
-export KBS_DB_PW=${USER}
-export KBS_DB=simple_kbs_test.db
-
-if [ -f ${KBS_DB} ]; then
-	rm -f ${KBS_DB}
-fi
-
-sqlite3 ${KBS_DB} < db-sqlite.sql 
-
-echo "+ Running: cargo test using local sqlite"
-cargo test
-
-rm -f ${KBS_DB}
