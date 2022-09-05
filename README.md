@@ -3,7 +3,7 @@
 `simple-kbs` verifies the launch measurements of SEV(-ES) guests and conditionally provides secrets.
 
 The KBS has three gRPC endpoints, `GetBundle`, `GetSecret`, `GetOnlineSecret`.
-These endpoints are described below and defined in the [protobuf](src/grpc/keybroker.proto).
+These endpoints are described below and defined in the [protobuf](src/grpc/proto/keybroker.proto).
 
 To validate confidential guests, the guest owner must pre-provision the KBS
 with policy information. This KBS uses a database to store policies and secrets.
