@@ -1,0 +1,4 @@
+FROM mariadb:latest
+
+COPY db-mysql.sql /docker-entrypoint-initdb.d/10-db-mysql.sql
+COPY db/initial-data.sql /docker-entrypoint-initdb.d/20-initial-data.sql
