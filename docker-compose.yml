@@ -1,0 +1,30 @@
+version: '3.1'
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.simple-kbs
+    restart: always
+    environment:
+      KBS_DB_TYPE: mysql
+      KBS_DB_HOST: db
+      KBS_DB_USER: kbsuser
+      KBS_DB_PW: kbspassword
+      KBS_DB: simple_kbs
+      RUST_LOG: debug
+    ports:
+      - "44444:44444"
+    depends_on:
+      - db
+
+  db:
+    build:
+      context: .
+      dockerfile: Dockerfile.kbs-db
+    restart: always
+    environment:
+      MARIADB_ROOT_PASSWORD: unused
+      MARIADB_DATABASE: simple_kbs
+      MARIADB_USER: kbsuser
+      MARIADB_PASSWORD: kbspassword
