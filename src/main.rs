@@ -15,11 +15,13 @@ pub mod policy;
 pub mod request;
 pub mod sev_tools;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
     let args = Command::new("simple-kbs")
-        .version("0.0.1")
+        .version(VERSION)
         .arg(
             Arg::new("socket addr")
                 .long("grpc_sock")
