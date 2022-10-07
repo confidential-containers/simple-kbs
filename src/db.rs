@@ -7,6 +7,7 @@ use crate::policy;
 use crate::request;
 
 use anyhow::*;
+use log::*;
 use rand::Rng;
 use std::env;
 use std::result::Result::Ok;
@@ -314,12 +315,33 @@ impl KbsDb {
         let query_str = "SELECT kskeys FROM keysets WHERE keysetid = ?";
         let new_query_str = self.replace_binds(query_str);
 
-        let keyset_row = sqlx::query(&new_query_str)
+        // Need to check 2 cases: 1) no keyset keys are returned from the query; 2) keysets are
+        // returned but cannot be deserialized into JSON by serde_json::from_str().
+        let keyset_row = match sqlx::query(&new_query_str)
             .bind(keysetid)
             .fetch_one(&self.dbpool)
-            .await?;
-        let rks: Vec<String> = serde_json::from_str(&keyset_row.try_get::<String, _>(0)?)?;
-        Ok(rks)
+            .await
+        {
+            Ok(ksr) => ksr,
+            Err(e) => {
+                warn!(
+                    "db::get_keyset_ids did not return keyset ids for id {}, query error {}",
+                    keysetid, e
+                );
+                return Ok(Vec::<String>::new());
+            }
+        };
+
+        match serde_json::from_str(&keyset_row.try_get::<String, _>(0)?) {
+            Ok(rkv) => Ok(rkv),
+            Err(e) => {
+                warn!(
+                    "db::get_keyset_ids did return a row for keyset id {}, but was not able to create JSON using serde_json::from_str() with error {}",
+                    keysetid, e
+                );
+                Ok(Vec::<String>::new())
+            }
+        }
     }
 
     pub async fn get_secret(&self, secret_id: &str) -> Result<request::Key> {
@@ -624,7 +646,6 @@ mod tests {
         Ok(())
     }
 
-    //#[test]
     #[tokio::test]
     async fn test_insert_keyset() -> anyhow::Result<()> {
         let db = KbsDb::new().await?;
@@ -657,6 +678,15 @@ mod tests {
 
         db.delete_keyset(&ksetid).await?;
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_keyset_no_entry() -> anyhow::Result<()> {
+        let db = KbsDb::new().await?;
+        let bad_ksetid = Uuid::new_v4().as_hyphenated().to_string();
+        let empty_vec = db.get_keyset_ids(&bad_ksetid).await?;
+        assert_eq!(empty_vec.len(), 0);
         Ok(())
     }
 
