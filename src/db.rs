@@ -371,7 +371,7 @@ impl KbsDb {
         keypair: &[u8],
         policy_id: Option<u64>,
     ) -> Result<()> {
-        let keypair_b64 = base64::encode(&keypair);
+        let keypair_b64 = base64::encode(keypair);
         let query_str = "INSERT INTO report_keypair (key_id, keypair, polid ) VALUES(?, ?, ?)";
         let new_query_str = self.replace_binds(query_str);
         sqlx::query(&new_query_str)

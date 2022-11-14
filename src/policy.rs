@@ -21,7 +21,7 @@ pub struct Policy {
 
 impl Policy {
     pub fn tenant_default() -> Result<Policy> {
-        let policy_string = fs::read_to_string(&DEFAULT_POLICY_PATH).map_err(|e| {
+        let policy_string = fs::read_to_string(DEFAULT_POLICY_PATH).map_err(|e| {
             anyhow!(
                 "Default tenant configuration expected at {}. Error: {}",
                 &DEFAULT_POLICY_PATH,
