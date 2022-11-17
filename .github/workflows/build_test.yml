@@ -77,7 +77,7 @@ jobs:
         run: |
           sudo systemctl start mysql
           mysql -u${{env.KBS_DB_USER}} -p${{env.KBS_DB_PW}} -e 'CREATE DATABASE ${{env.KBS_DB}};'
-          mysql -u${{env.KBS_DB_USER}} -p${{env.KBS_DB_PW}} ${{env.KBS_DB}} < db-mysql.sql
+          mysql -u${{env.KBS_DB_USER}} -p${{env.KBS_DB_PW}} ${{env.KBS_DB}} < db/db-mysql.sql
 
       - name: cargo test
         uses: actions-rs/cargo@v1
