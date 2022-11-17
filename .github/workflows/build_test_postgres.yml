@@ -49,7 +49,7 @@ jobs:
           sudo systemctl start postgresql.service
           sudo systemctl status -l postgresql.service
           PGPASSWORD=${{env.PGPASSWORD}} psql -U ${{env.KBS_DB_USER}} -h ${{env.KBS_DB_HOST}} -c "CREATE DATABASE ${{env.KBS_DB}};"
-          PGPASSWORD=${{env.PGPASSWORD}} psql -U ${{env.KBS_DB_USER}} -h ${{env.KBS_DB_HOST}} ${{env.KBS_DB}} < db-postgres.sql
+          PGPASSWORD=${{env.PGPASSWORD}} psql -U ${{env.KBS_DB_USER}} -h ${{env.KBS_DB_HOST}} ${{env.KBS_DB}} < db/db-postgres.sql
 
       - name: cargo test
         uses: actions-rs/cargo@v1
