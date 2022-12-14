@@ -8,7 +8,7 @@ cargo fmt --all -- --check
 echo "+ Running: cargo clippy"
 cargo clippy --all-targets --all-features -- -D warnings -A clippy::derive_partial_eq_without_eq
 
-SIMPLE_KBS_DIR="$(dirname $0)/.."
+SIMPLE_KBS_DIR="$(dirname $0)/../db"
 
 export KBS_DB_TYPE=mysql
 export KBS_DB_HOST=127.0.0.1
