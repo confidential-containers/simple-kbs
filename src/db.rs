@@ -414,7 +414,7 @@ impl KbsDb {
             .fetch_one(&self.dbpool)
             .await?;
         let kp = key_row.try_get::<String, _>(0)?;
-        let kp_bytes = base64::decode(&kp)?;
+        let kp_bytes = base64::decode(kp)?;
         Ok(kp_bytes)
     }
 

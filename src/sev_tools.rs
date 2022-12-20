@@ -16,7 +16,7 @@ pub fn generate_launch_bundle(
 ) -> Result<(String, String, Session<Initialized>)> {
     let session = Session::try_from(Policy::from(policy)).unwrap();
 
-    let mut bin_chain = std::io::Cursor::new(base64::decode(&cert_chain)?);
+    let mut bin_chain = std::io::Cursor::new(base64::decode(cert_chain)?);
     let chain = sev::certs::Chain::decode(&mut bin_chain, ())
         .map_err(|e| anyhow!("Cert Chain not formatted correctly: {}", e))?;
 
@@ -28,7 +28,7 @@ pub fn generate_launch_bundle(
     let mut binary_godh = std::io::Cursor::new(Vec::new());
     start.cert.encode(&mut binary_godh, ())?;
 
-    let godh = base64::encode(&binary_godh.into_inner());
+    let godh = base64::encode(binary_godh.into_inner());
     let launch_blob = base64::encode(bincode::serialize(&start.session).unwrap());
 
     Ok((godh, launch_blob, session))
@@ -49,7 +49,7 @@ pub fn verify_measurement(
         build: connection.fw_build_id as u8,
     };
 
-    let mut bin_measure = std::io::Cursor::new(base64::decode(&launch_measurement)?);
+    let mut bin_measure = std::io::Cursor::new(base64::decode(launch_measurement)?);
     let measure = sev::launch::sev::Measurement::decode(&mut bin_measure, ()).unwrap();
 
     session
