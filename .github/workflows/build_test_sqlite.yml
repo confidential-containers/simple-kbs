@@ -1,0 +1,39 @@
+name: simple-kbs sqlite tests
+
+on:
+  push:
+    branches: [ main, staging ]
+  pull_request:
+    branches: [ main, staging ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      KBS_DB_HOST: localhost
+      KBS_DB_USER: dummy
+      KBS_DB_PW: dummy
+      KBS_DB: simple_kbs.sqlite
+      KBS_DB_TYPE: sqlite
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Setup sqlite
+        run: |
+          sqlite3 ${{env.KBS_DB}} < db/db-sqlite.sql
+
+      - name: cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test

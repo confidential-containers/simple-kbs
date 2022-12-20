@@ -8,7 +8,7 @@ cargo fmt --all -- --check
 echo "+ Running: cargo clippy"
 cargo clippy --all-targets --all-features -- -D warnings -A clippy::derive_partial_eq_without_eq
 
-SIMPLE_KBS_DIR="$(dirname $0)/.."
+SIMPLE_KBS_DIR="$(dirname $0)/../db"
 
 export KBS_DB_TYPE=mysql
 export KBS_DB_HOST=127.0.0.1
@@ -85,3 +85,21 @@ cargo test
 echo "+ Stopping kbs-db-postgres DB server container..."
 docker stop kbs-db-postgres
 
+
+export KBS_DB_HOST=127.0.0.1
+export KBS_DB_USER=dummy
+export KBS_DB_PW=dummy
+export KBS_DB=simple-kbs-test.sqlite
+export KBS_DB_TYPE=sqlite
+
+echo "+ Creating sqlite database ${KBS_DB}"
+rm -f ${KBS_DB} ${KBS_DB}-*
+sqlite3 ${KBS_DB} < "${SIMPLE_KBS_DIR}/db-sqlite.sql"
+
+echo "+ Running: cargo test for sqlite"
+cargo test
+
+echo "+ Erasing sqlite database ${KBS_DB}"
+rm -f ${KBS_DB} ${KBS_DB}-*
+
+echo "+ Done"
