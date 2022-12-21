@@ -247,9 +247,9 @@ impl KbsDb {
             .bind(sec)
             .fetch_one(&self.dbpool)
             .await?;
-        match pol_row.try_get::<i64, _>(0) {
-            Ok(pid) => Ok(Some(self.get_policy(pid as u64).await?)),
-            Err(_e) => Ok(None),
+        match pol_row.try_get::<Option<i64>, _>(0)? {
+            Some(pid) => Ok(Some(self.get_policy(pid as u64).await?)),
+            None => Ok(None),
         }
     }
 
@@ -305,9 +305,9 @@ impl KbsDb {
             .fetch_one(&self.dbpool)
             .await?;
 
-        match pol_row.try_get::<i64, _>(0) {
-            Ok(pid) => Ok(Some(self.get_policy(pid as u64).await?)),
-            Err(_e) => Ok(None),
+        match pol_row.try_get::<Option<i64>, _>(0)? {
+            Some(pid) => Ok(Some(self.get_policy(pid as u64).await?)),
+            None => Ok(None),
         }
     }
 
@@ -414,7 +414,7 @@ impl KbsDb {
             .fetch_one(&self.dbpool)
             .await?;
         let kp = key_row.try_get::<String, _>(0)?;
-        let kp_bytes = base64::decode(&kp)?;
+        let kp_bytes = base64::decode(kp)?;
         Ok(kp_bytes)
     }
 
