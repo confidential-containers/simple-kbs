@@ -13,6 +13,7 @@ FROM debian:bullseye
 WORKDIR /usr/local/bin
 COPY --from=builder /usr/src/simple-kbs/target/release/simple-kbs ./
 COPY default_policy.json ./
+COPY resources resources/
 
 EXPOSE 44444
 CMD ["simple-kbs", "--grpc_sock=0.0.0.0:44444"]
