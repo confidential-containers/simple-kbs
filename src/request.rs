@@ -165,7 +165,7 @@ impl Key {
     pub fn bytes(&self) -> Result<Vec<u8>> {
         base64::decode(&self.payload).map_err(|e| {
             // Provide full details in KBS log
-            error!("Binary secrets must be b64 encoded: {}", e);
+            error!("Binary secrets must be base64 encoded: {}", e);
             anyhow!("Invalid Secret Format")
         })
     }
