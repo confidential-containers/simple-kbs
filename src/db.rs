@@ -52,9 +52,9 @@ impl KbsDb {
     pub async fn new() -> Result<Self> {
         let db_type = env::var("KBS_DB_TYPE")
             .map_err(|e| anyhow!("KbsDb::new() - env var KBS_DB_TYPE parse error = {}", e))?;
-        let host_name = env::var("KBS_DB_HOST")
+        let db_host = env::var("KBS_DB_HOST")
             .map_err(|e| anyhow!("KbsDb::new() - env var KBS_DB_HOST parse error = {}", e))?;
-        let user_name = env::var("KBS_DB_USER")
+        let db_user = env::var("KBS_DB_USER")
             .map_err(|e| anyhow!("KbsDb::new() - env var KBS_DB_USER parse error = {}", e))?;
         let db_pw = env::var("KBS_DB_PW")
             .map_err(|e| anyhow!("KbsDb::new() - env var KBS_DB_PW parse error = {}", e))?;
@@ -66,10 +66,9 @@ impl KbsDb {
             Err(_e) => 1000u32,
         };
 
-        let db_url = if db_type == "sqlite" {
-            format!("{db_type}://{db_name}")
-        } else {
-            format!("{db_type}://{user_name}:{db_pw}@{host_name}/{db_name}")
+        let db_url = match &db_type[..] {
+            "sqlite" => format!("{db_type}://{db_name}"),
+            _ => format!("{db_type}://{db_user}:{db_pw}@{db_host}/{db_name}"),
         };
 
         let dbpool = AnyPoolOptions::new()
