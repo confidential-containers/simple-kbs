@@ -52,7 +52,7 @@ impl KeyBrokerService for KeyBroker {
 
         // validate certificate chain
         let (godh, launch_blob, session) = generate_launch_bundle(r.policy, r.certificate_chain)
-            .map_err(|e| Status::internal(format!("Failed to generate launch bundle: {}", e)))?;
+            .map_err(|e| Status::internal(format!("Failed to generate launch bundle: {e}")))?;
 
         let launch_id = Ok(Uuid::new_v4()).unwrap();
         SESSIONS.lock().unwrap().insert(launch_id, session);
@@ -75,7 +75,7 @@ impl KeyBrokerService for KeyBroker {
         // Get connection from DB using connection ID
         let r = request.into_inner();
         let launch_id = Uuid::parse_str(&r.launch_id)
-            .map_err(|e| Status::internal(format!("Malformed Launch ID: {}", e)))?;
+            .map_err(|e| Status::internal(format!("Malformed Launch ID: {e}")))?;
 
         // keep track of the connection
         let connection = Connection {
@@ -91,14 +91,14 @@ impl KeyBrokerService for KeyBroker {
 
         secret_request
             .parse_requests(&r.secret_requests)
-            .map_err(|e| Status::internal(format!("Bad secret request: {}", e)))?;
+            .map_err(|e| Status::internal(format!("Bad secret request: {e}")))?;
 
         let policies = secret_request.policies(&self.db).await;
 
         // Validate connection against policies
         for p in policies {
             p.verify(&connection)
-                .map_err(|e| Status::internal(format!("Policy validation failed: {}", e)))?;
+                .map_err(|e| Status::internal(format!("Policy validation failed: {e}")))?;
         }
         info!(
             "Policy validated succesfully. Connection: {:?}",
@@ -111,16 +111,16 @@ impl KeyBrokerService for KeyBroker {
 
         // verify launch measurement
         let session_verified = verify_measurement(&connection, r.launch_measurement, session)
-            .map_err(|e| Status::internal(format!("Measurement Verification Failed: {}", e)))?;
+            .map_err(|e| Status::internal(format!("Measurement Verification Failed: {e}")))?;
 
         // get secret(s)
         let secret_payload = &secret_request
             .payload_table(&self.db, &connection)
             .await
-            .map_err(|e| Status::internal(format!("Cannot fulfill secret request: {}", e)))?;
+            .map_err(|e| Status::internal(format!("Cannot fulfill secret request: {e}")))?;
 
         let (secret_header, secret_data) = package_secret(session_verified, secret_payload)
-            .map_err(|e| Status::internal(format!("Failed to package secret: {}", e)))?;
+            .map_err(|e| Status::internal(format!("Failed to package secret: {e}")))?;
 
         let reply = SecretResponse {
             launch_secret_header: secret_header,
@@ -135,26 +135,26 @@ impl KeyBrokerService for KeyBroker {
     ) -> Result<Response<OnlineSecretResponse>, Status> {
         let r = request.into_inner();
         let client_id = Uuid::parse_str(&r.client_id)
-            .map_err(|e| Status::internal(format!("Malformed Client ID: {}", e)))?;
+            .map_err(|e| Status::internal(format!("Malformed Client ID: {e}")))?;
 
         let (connection, key) = self
             .db
             .get_connection(client_id)
             .await
-            .map_err(|e| Status::internal(format!("Connection not found: {}", e)))?;
+            .map_err(|e| Status::internal(format!("Connection not found: {e}")))?;
 
         let mut secret_request = request::SecretRequest::new();
 
         secret_request
             .parse_requests(&r.secret_requests)
-            .map_err(|e| Status::internal(format!("Bad secret request: {}", e)))?;
+            .map_err(|e| Status::internal(format!("Bad secret request: {e}")))?;
 
         let policies = secret_request.policies(&self.db).await;
 
         // Validate connection against policies
         for p in policies {
             p.verify(&connection)
-                .map_err(|e| Status::internal(format!("Policy validation failed: {}", e)))?;
+                .map_err(|e| Status::internal(format!("Policy validation failed: {e}")))?;
         }
         info!(
             "Policy validated succesfully. Connection: {:?}",
@@ -164,11 +164,11 @@ impl KeyBrokerService for KeyBroker {
         let secret_payload = &secret_request
             .payload_simple(&self.db, &connection)
             .await
-            .map_err(|e| Status::internal(format!("Cannot fulfill secret request: {}", e)))?;
+            .map_err(|e| Status::internal(format!("Cannot fulfill secret request: {e}")))?;
 
         // encrypt secret payload
         let (payload, iv) = crypto::encrypt_secret_payload(secret_payload, key)
-            .map_err(|e| Status::internal(format!("Failed to encrypt secret: {}", e)))?;
+            .map_err(|e| Status::internal(format!("Failed to encrypt secret: {e}")))?;
 
         let response = OnlineSecretResponse { payload, iv };
 

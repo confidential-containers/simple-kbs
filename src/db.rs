@@ -58,7 +58,7 @@ impl KbsDb {
             .map_err(|e| anyhow!("KbsDb::new() - env var KBS_DB_USER parse error = {}", e))?;
         let db_pw = env::var("KBS_DB_PW")
             .map_err(|e| anyhow!("KbsDb::new() - env var KBS_DB_PW parse error = {}", e))?;
-        let data_base = env::var("KBS_DB")
+        let db_name = env::var("KBS_DB")
             .map_err(|e| anyhow!("KbsDb::new() - env var KBS_DB parse error = {}", e))?;
 
         let max_conns = match env::var("KBS_DB_MAX_CONNS") {
@@ -67,12 +67,9 @@ impl KbsDb {
         };
 
         let db_url = if db_type == "sqlite" {
-            format!("{}://{}", db_type, data_base)
+            format!("{db_type}://{db_name}")
         } else {
-            format!(
-                "{}://{}:{}@{}/{}",
-                db_type, user_name, db_pw, host_name, data_base
-            )
+            format!("{db_type}://{user_name}:{db_pw}@{host_name}/{db_name}")
         };
 
         let dbpool = AnyPoolOptions::new()
@@ -80,10 +77,7 @@ impl KbsDb {
             .connect(&db_url)
             .await
             .map_err(|e| {
-                anyhow!(
-                    "db::get_db_pool:: Encountered error trying to create database pool: {}",
-                    e
-                )
+                anyhow!("db::get_db_pool:: Encountered error trying to create database pool: {e}")
             })?;
         Ok(Self { dbpool })
     }
@@ -98,7 +92,7 @@ impl KbsDb {
         let mut counter = 0;
         let result = question_mark_re.replace_all(sql, |_: &Captures| {
             counter += 1;
-            format!("${}", counter)
+            format!("${counter}")
         });
         result.to_string()
     }
