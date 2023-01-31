@@ -122,7 +122,7 @@ impl SecretType for SecretKey {
     async fn payload(&self, db: &KbsDb, connection: Connection) -> Result<Vec<u8>> {
         let key = db.get_secret(&self.request.id).await?;
         Ok(match &self.request.format[..] {
-            "binary" => key.into_bytes(),
+            "binary" => key.bytes()?,
             "json" => serde_json::to_string(&key).unwrap().into_bytes(),
             _ => return Err(anyhow!("Unknown format type")),
         })
@@ -162,8 +162,12 @@ pub struct Key {
 }
 
 impl Key {
-    pub fn into_bytes(&self) -> Vec<u8> {
-        base64::decode(&self.payload).unwrap()
+    pub fn bytes(&self) -> Result<Vec<u8>> {
+        base64::decode(&self.payload).map_err(|e| {
+            // Provide full details in KBS log
+            error!("Binary secrets must be b64 encoded: {}", e);
+            anyhow!("Invalid Secret Format")
+        })
     }
 }
 
