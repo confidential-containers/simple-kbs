@@ -17,7 +17,7 @@ pub fn generate_launch_bundle(
     let session = Session::try_from(Policy::from(policy)).unwrap();
 
     let mut bin_chain = std::io::Cursor::new(base64::decode(cert_chain)?);
-    let chain = sev::certs::Chain::decode(&mut bin_chain, ())
+    let chain = sev::certs::sev::Chain::decode(&mut bin_chain, ())
         .map_err(|e| anyhow!("Cert Chain not formatted correctly: {}", e))?;
 
     let start = session
