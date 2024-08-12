@@ -11,15 +11,27 @@ use log::*;
 use rand::Rng;
 use std::env;
 use std::result::Result::Ok;
+use std::str::FromStr;
 use uuid::Uuid;
 
 use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
-use sqlx::any::{AnyKind, AnyPoolOptions};
+use sqlx::any::{install_default_drivers, AnyPoolOptions};
 use sqlx::AnyPool;
 use sqlx::Row;
+use strum_macros::EnumString;
 
 const CONNECTION_KEY_LENGTH: usize = 32;
+
+#[derive(Debug, PartialEq, EnumString)]
+enum DbType {
+    #[strum(ascii_case_insensitive)]
+    MySQL,
+    #[strum(ascii_case_insensitive)]
+    Postgres,
+    #[strum(ascii_case_insensitive)]
+    Sqlite,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Connection {
@@ -46,6 +58,7 @@ impl Default for Connection {
 
 pub struct KbsDb {
     dbpool: AnyPool,
+    r#type: DbType,
 }
 
 impl KbsDb {
@@ -71,6 +84,8 @@ impl KbsDb {
             _ => format!("{db_type}://{db_user}:{db_pw}@{db_host}/{db_name}"),
         };
 
+        install_default_drivers();
+
         let dbpool = AnyPoolOptions::new()
             .max_connections(max_conns)
             .connect(&db_url)
@@ -78,11 +93,15 @@ impl KbsDb {
             .map_err(|e| {
                 anyhow!("db::get_db_pool:: Encountered error trying to create database pool: {e}")
             })?;
-        Ok(Self { dbpool })
+
+        let r#type = DbType::from_str(&db_type)
+            .map_err(move |_| anyhow!("Unknown Database Type {}", &db_type))?;
+
+        Ok(Self { dbpool, r#type })
     }
 
     fn replace_binds(&self, sql: &str) -> String {
-        if self.dbpool.any_kind() != AnyKind::Postgres {
+        if self.r#type != DbType::PostgreSQL {
             return sql.to_string();
         }
 
@@ -103,7 +122,7 @@ impl KbsDb {
         let key_bytes = rand::thread_rng().gen::<[u8; CONNECTION_KEY_LENGTH]>();
         let key_b64 = base64::encode(key_bytes);
 
-        let query_str = if self.dbpool.any_kind() == AnyKind::Sqlite {
+        let query_str = if self.r#type == DbType::Sqlite {
             "INSERT INTO conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, symkey, create_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE('now'))"
         } else {
             "INSERT INTO conn_bundle (id, policy, fw_api_major, fw_api_minor, fw_build_id, launch_description, fw_digest, symkey, create_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())"
@@ -166,13 +185,13 @@ impl KbsDb {
         let allowed_policies_json = serde_json::to_string(&policy.allowed_policies)?;
         let allowed_build_ids_json = serde_json::to_string(&policy.allowed_build_ids)?;
 
-        let mut query_str = if self.dbpool.any_kind() == AnyKind::Sqlite {
+        let mut query_str = if self.r#type == DbType::Sqlite {
             String::from("INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(?, ?, ?, ?, ?, DATE('now'), 1)")
         } else {
             String::from("INSERT INTO policy (allowed_digests, allowed_policies, min_fw_api_major, min_fw_api_minor, allowed_build_ids, create_date, valid) VALUES(?, ?, ?, ?, ?, NOW(), 1)")
         };
 
-        if self.dbpool.any_kind() == AnyKind::MySql || self.dbpool.any_kind() == AnyKind::Sqlite {
+        if self.r#type == DbType::MySQL || self.r#type == DbType::Sqlite {
             let last_insert_row = sqlx::query(&query_str)
                 .bind(allowed_digests_json)
                 .bind(allowed_policies_json)
