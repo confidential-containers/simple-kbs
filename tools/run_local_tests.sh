@@ -49,7 +49,7 @@ docker stop kbs-db
 export KBS_DB_USER=postgres
 export KBS_DB_PW=root
 #export KBS_DB=simple_kbs
-export KBS_DB_TYPE=postgresql
+export KBS_DB_TYPE=postgres
 
 export POSTGRES_PASSWORD=$KBS_DB_PW \
 export POSTGRES_USER=$KBS_DB_USER \
