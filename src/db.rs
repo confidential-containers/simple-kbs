@@ -7,7 +7,6 @@ use crate::policy;
 use crate::request;
 
 use anyhow::*;
-use log::*;
 use rand::Rng;
 use std::env;
 use std::result::Result::Ok;
@@ -267,12 +266,41 @@ impl KbsDb {
             .fetch_one(&self.dbpool)
             .await?;
 
+        // Conditional Decoding to work around MySQL limitations
+        // Ideally this would be extracted into a separate function.
+        let allowed_digests_string = match self.r#type {
+            DbType::MySQL => {
+                let bytes = policy_row.try_get::<Vec<u8>, _>(0)?;
+                std::string::String::from_utf8(bytes)?
+            }
+            _ => policy_row.try_get::<String, _>(0)?,
+        };
+        let allowed_digests = serde_json::from_str(&allowed_digests_string)?;
+
+        let allowed_policies_string = match self.r#type {
+            DbType::MySQL => {
+                let bytes = policy_row.try_get::<Vec<u8>, _>(1)?;
+                std::string::String::from_utf8(bytes)?
+            }
+            _ => policy_row.try_get::<String, _>(1)?,
+        };
+        let allowed_policies = serde_json::from_str(&allowed_policies_string)?;
+
+        let allowed_build_ids_string = match self.r#type {
+            DbType::MySQL => {
+                let bytes = policy_row.try_get::<Vec<u8>, _>(4)?;
+                std::string::String::from_utf8(bytes)?
+            }
+            _ => policy_row.try_get::<String, _>(4)?,
+        };
+        let allowed_build_ids = serde_json::from_str(&allowed_build_ids_string)?;
+
         Ok(policy::Policy {
-            allowed_digests: serde_json::from_str(&policy_row.try_get::<String, _>(0)?)?,
-            allowed_policies: serde_json::from_str(&policy_row.try_get::<String, _>(1)?)?,
+            allowed_digests,
+            allowed_policies,
             min_fw_api_major: policy_row.try_get::<i32, _>(2)? as u32,
             min_fw_api_minor: policy_row.try_get::<i32, _>(3)? as u32,
-            allowed_build_ids: serde_json::from_str(&policy_row.try_get::<String, _>(4)?)?,
+            allowed_build_ids,
         })
     }
 
@@ -363,32 +391,22 @@ impl KbsDb {
         let query_str = "SELECT kskeys FROM keysets WHERE keysetid = ?";
         let new_query_str = self.replace_binds(query_str);
 
-        // Need to check 2 cases: 1) no keyset keys are returned from the query; 2) keysets are
-        // returned but cannot be deserialized into JSON by serde_json::from_str().
-        let keyset_row = match sqlx::query(&new_query_str)
+        if let Ok(keyset_row) = sqlx::query(&new_query_str)
             .bind(keysetid)
             .fetch_one(&self.dbpool)
             .await
         {
-            Ok(ksr) => ksr,
-            Err(e) => {
-                warn!(
-                    "db::get_keyset_ids did not return keyset ids for id {}, query error {}",
-                    keysetid, e
-                );
-                return Ok(Vec::<String>::new());
-            }
-        };
+            let keyset_string = match self.r#type {
+                DbType::MySQL => {
+                    let keyset_bytes = keyset_row.try_get::<Vec<u8>, _>(0)?;
+                    std::string::String::from_utf8(keyset_bytes)?
+                }
+                _ => keyset_row.try_get::<String, _>(0)?,
+            };
 
-        match serde_json::from_str(&keyset_row.try_get::<String, _>(0)?) {
-            Ok(rkv) => Ok(rkv),
-            Err(e) => {
-                warn!(
-                    "db::get_keyset_ids did return a row for keyset id {}, but was not able to create JSON using serde_json::from_str() with error {}",
-                    keysetid, e
-                );
-                Ok(Vec::<String>::new())
-            }
+            Ok(serde_json::from_str(&keyset_string).unwrap_or(Vec::<String>::new()))
+        } else {
+            Ok(Vec::<String>::new())
         }
     }
 
@@ -769,7 +787,7 @@ mod tests {
 
         let polid = db.insert_policy(&testpol).await?;
 
-        let mut tid = "man-moon-dog-face-in-the-banana-patch-ksp".to_string();
+        let tid = "man-moon-dog-face-in-the-banana-patch-ksp".to_string();
 
         let pkcs8_dummy_bytes = [0xa5u8; 512];
 
@@ -784,7 +802,7 @@ mod tests {
 
         // Now test report_keypair without a policy
 
-        tid = "the-quick-brown-cow-jumped-over-the-moon-no-policy".to_string();
+        let tid = "the-quick-brown-cow-jumped-over-the-moon-no-policy".to_string();
 
         db.insert_report_keypair(&tid, &pkcs8_dummy_bytes, None)
             .await?;
