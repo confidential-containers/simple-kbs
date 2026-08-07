@@ -1,3 +1,5 @@
+***This project is archived. Do not use in security-sensitive environments.***
+
 # Simple Key Broker Server
 
 `simple-kbs` verifies the launch measurements of SEV(-ES) guests and conditionally provides secrets.
