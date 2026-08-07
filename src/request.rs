@@ -448,7 +448,7 @@ mod tests {
         db.insert_secret(&secret_id, &secret_value, None)
             .await
             .unwrap();
-        db.insert_keyset(&bundle_id, &[secret_id.clone()], None)
+        db.insert_keyset(&bundle_id, std::slice::from_ref(&secret_id), None)
             .await
             .unwrap();
 
